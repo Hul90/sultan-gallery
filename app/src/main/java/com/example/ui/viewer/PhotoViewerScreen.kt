@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
@@ -102,7 +105,6 @@ fun PhotoViewerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -120,7 +122,7 @@ fun PhotoViewerScreen(
             visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
         ) {
             TopAppBar(
                 title = {
@@ -184,7 +186,7 @@ fun PhotoViewerScreen(
             visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
         ) {
             Row(
                 modifier = Modifier
@@ -294,7 +296,18 @@ private fun ZoomablePhotoItem(
                     }
                 )
             }
-,
+            .pointerInput(scale) {
+                if (scale > 1f) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 5f)
+                        if (scale > 1f) {
+                            offset = Offset(offset.x + pan.x, offset.y + pan.y)
+                        } else {
+                            offset = Offset.Zero
+                        }
+                    }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         if (isPdf) {

@@ -1,10 +1,5 @@
 package com.example.ui.components
 
-import android.media.MediaMetadataRetriever
-import android.net.Uri
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -31,10 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.Image
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.example.data.model.MediaItem
 import com.example.ui.theme.SultanGold
 
@@ -99,35 +91,13 @@ fun MediaThumbnail(
                     )
                 }
             }
-        } else if (item.isVideo) {
-            val videoFrame by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = item.uri) {
-                value = withContext(Dispatchers.IO) {
-                    runCatching {
-                        MediaMetadataRetriever().use { retriever ->
-                            retriever.setDataSource(context, item.uri)
-                            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        }
-                    }.getOrNull()
-                }
-            }
-            if (videoFrame != null) {
-                Image(
-                    bitmap = videoFrame!!.asImageBitmap(),
-                    contentDescription = item.displayName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                AsyncImage(
-                    model = ImageRequest.Builder(context).data(item.uri).crossfade(true).build(),
-                    contentDescription = item.displayName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
         } else {
             AsyncImage(
-                model = ImageRequest.Builder(context).data(item.uri).crossfade(true).build(),
+                model = ImageRequest.Builder(context)
+                    .data(item.uri)
+                    .apply { if (item.isVideo) videoFrameMillis(1_000) }
+                    .crossfade(true)
+                    .build(),
                 contentDescription = item.displayName,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()

@@ -87,6 +87,7 @@ dependencies {
   implementation(libs.coil.compose)
   implementation(libs.coil.gif)
   implementation(libs.coil.svg)
+  implementation(libs.coil.video)
   implementation(libs.androidx.exifinterface)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.ui)

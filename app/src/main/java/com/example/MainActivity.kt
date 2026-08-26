@@ -123,7 +123,12 @@ fun SultanGalleryApp(
                     VideoPlayerScreen(
                         mediaId = mediaId,
                         viewModel = galleryViewModel,
-                        onNavigateBack = { navController.popBackStack() }
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToVideo = { nextId ->
+                            navController.navigate(NavRoutes.videoPlayer(nextId)) {
+                                popUpTo(NavRoutes.VIDEO_PLAYER) { inclusive = true }
+                            }
+                        }
                     )
                 }
 
