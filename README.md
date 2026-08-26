@@ -1,30 +1,19 @@
 # SULTAN GALLERY
 
-Professional multi-format Android gallery and media manager.
+Professional Android gallery and media manager by MD SULTAN MAHAMUD.
 
-## Build with Gradle Wrapper
+## GitHub APK Build
 
-### Windows
+The repository is configured for GitHub Actions. Upload the project contents to a GitHub repository and run the **Build Sultan Gallery Android APK** workflow.
 
-```bat
-gradlew.bat assembleDebug
-```
+The workflow installs the pinned Gradle version, runs the debug unit tests, builds the debug APK, and uploads the APK as a workflow artifact. No local `.env` or signing key is required for the debug build.
 
-### macOS / Linux / Git Bash
+## Runtime permissions
 
-```bash
-chmod +x gradlew
-./gradlew assembleDebug
-```
+On Android 13+ the app requests photo/video/audio media permissions. On Android 14+ Android may grant **limited selected-photo/video access**; in that mode Android intentionally exposes only the media selected by the user. SULTAN GALLERY detects that state and provides a **Manage** action that opens the app permission settings so the user can change access.
 
-The wrapper uses the Gradle distribution declared in `gradle/wrapper/gradle-wrapper.properties` and downloads it automatically on first use.
+## Developer
 
-## GitHub Actions
-
-Push the repository to GitHub. The workflow in `.github/workflows/build-apk.yml` uses the project wrapper, runs unit tests, builds the debug APK, and uploads the APK as a workflow artifact.
-
-## Notes
-
-- Do not commit real `.env` secrets or signing keys.
-- The debug APK is the default CI artifact.
-- Device-level media permissions and format support should be validated on the target Android devices.
+**MD SULTAN MAHAMUD**  
+Email: sultanmahamud5497@gmail.com  
+Mobile: 01740-236384
