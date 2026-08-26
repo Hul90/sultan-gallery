@@ -1,0 +1,6 @@
+{
+  "name": "SULTAN GALLERY",
+  "description": "Premium Android Gallery, Photo Editor, Video Player, Media File Manager, and Sultan Tools suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
