@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,6 +102,7 @@ fun PhotoViewerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .windowInsetsPadding(WindowInsets.systemBars)
     ) {
         HorizontalPager(
             state = pagerState,
@@ -294,16 +294,7 @@ private fun ZoomablePhotoItem(
                     }
                 )
             }
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    if (scale > 1f) {
-                        offset = Offset(offset.x + pan.x, offset.y + pan.y)
-                    } else {
-                        offset = Offset.Zero
-                    }
-                }
-            },
+,
         contentAlignment = Alignment.Center
     ) {
         if (isPdf) {
