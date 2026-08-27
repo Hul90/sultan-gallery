@@ -457,6 +457,84 @@ fun GalleryHomeScreen(
 
 
 @Composable
+private fun SultanQuickPanel(
+    selectedCount: Int,
+    onTools: () -> Unit,
+    onShare: () -> Unit,
+    onMove: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shadowElevation = 8.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$selectedCount selected",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = SultanGold
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SultanQuickPanelAction(icon = Icons.Default.AutoAwesome, label = "Tools", onClick = onTools)
+                SultanQuickPanelAction(icon = Icons.Default.Share, label = "Share", onClick = onShare)
+                SultanQuickPanelAction(icon = Icons.Default.DriveFileMove, label = "Move", onClick = onMove)
+                SultanQuickPanelAction(icon = Icons.Default.ContentCopy, label = "Copy", onClick = onCopy)
+                SultanQuickPanelAction(icon = Icons.Default.Delete, label = "Delete", onClick = onDelete)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SultanQuickPanelAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = SultanGold,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
 private fun MoveCopyAlbumDialog(
     mode: String,
     albums: List<MediaAlbum>,
