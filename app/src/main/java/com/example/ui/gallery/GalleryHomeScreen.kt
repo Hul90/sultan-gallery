@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.example.data.model.GridMode
 import com.example.data.model.MediaAlbum
@@ -342,7 +343,14 @@ fun GalleryHomeScreen(
                 ) {
                     items(
                         items = state.filteredMedia,
-                        key = { it.id }
+                        key = { item ->
+                            val typePrefix = when {
+                                item.isVideo -> "v"
+                                item.isAudio -> "a"
+                                else -> "p"
+                            }
+                            "$typePrefix${item.id}"
+                        }
                     ) { item ->
                         val isSelected = state.selectedItemIds.contains(item.id)
                         MediaThumbnail(
@@ -423,7 +431,11 @@ private fun AlbumsQuickRow(
                         ) {
                             if (album.coverUri != null) {
                                 AsyncImage(
-                                    model = ImageRequest.Builder(context).data(album.coverUri).crossfade(true).build(),
+                                    model = ImageRequest.Builder(context)
+                                        .data(album.coverUri)
+                                        .crossfade(true)
+                                        .decoderFactory(VideoFrameDecoder.Factory())
+                                        .build(),
                                     contentDescription = album.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -635,6 +647,7 @@ private fun AlbumsGridView(
                                     model = ImageRequest.Builder(context)
                                         .data(album.coverUri)
                                         .crossfade(true)
+                                        .decoderFactory(VideoFrameDecoder.Factory())
                                         .build(),
                                     contentDescription = album.name,
                                     contentScale = ContentScale.Crop,

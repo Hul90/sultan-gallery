@@ -1,9 +1,10 @@
 package com.example.ui.player
 
-import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
-import android.media.AudioManager
 import android.app.Activity
+import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
@@ -11,22 +12,26 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.SkipNext
+import androidx.compose.material.icons.automirrored.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
@@ -38,16 +43,10 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.RotateRight
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +64,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,9 +74,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.calculateZoom
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -89,6 +91,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.example.ui.components.ImmersiveMode
 import com.example.ui.components.MediaDetailsDialog
 import com.example.ui.gallery.GalleryViewModel
 import com.example.ui.theme.SultanGold
@@ -96,6 +99,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @ExperimentalMaterial3Api
@@ -104,15 +108,30 @@ fun VideoPlayerScreen(
     mediaId: Long,
     viewModel: GalleryViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToVideo: (Long) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val localView = LocalView.current
-    val activity = localView.context as? Activity
+    val activity = context as? Activity
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val videoItem = remember(mediaId, state.allMedia) {
-        state.allMedia.find { it.id == mediaId }
+
+    // Only videos, never mixed with photos/audio: MediaStore ids are not unique across
+    // content types, so looking this id up in the combined list could open the wrong file.
+    val videoList = remember(state.allMedia) { state.allMedia.filter { it.isVideo } }
+
+    var currentIndex by remember(mediaId, videoList) {
+        val idx = videoList.indexOfFirst { it.id == mediaId }
+        mutableIntStateOf(if (idx >= 0) idx else 0)
+    }
+    val videoItem = videoList.getOrNull(currentIndex)
+
+    ImmersiveMode(enabled = true)
+
+    // Restore the app's normal orientation lock when leaving this screen.
+    DisposableEffect(Unit) {
+        val original = activity?.requestedOrientation
+        onDispose {
+            if (original != null) activity.requestedOrientation = original
+        }
     }
 
     if (videoItem == null) {
@@ -131,21 +150,58 @@ fun VideoPlayerScreen(
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var showSpeedMenu by remember { mutableStateOf(false) }
     var showDetailsDialog by remember { mutableStateOf(false) }
-    var zoom by remember { mutableFloatStateOf(1f) }
-    var rotation by remember { mutableFloatStateOf(0f) }
-    var brightness by remember { mutableFloatStateOf(activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f) }
-    val videoList = remember(state.allMedia) { state.allMedia.filter { it.isVideo } }
-    val currentVideoIndex = videoList.indexOfFirst { it.id == videoItem.id }
-    val hasPrevious = currentVideoIndex > 0
-    val hasNext = currentVideoIndex >= 0 && currentVideoIndex < videoList.lastIndex
+    var isLandscape by remember { mutableStateOf(false) }
 
-    val exoPlayer = remember(videoItem.uri) {
+    // Pinch-to-zoom of the video surface
+    var videoScale by remember { mutableFloatStateOf(1f) }
+
+    // Volume / brightness gesture overlays
+    val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
+    val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
+    var volumeLevel by remember { mutableFloatStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()) }
+    var showVolumeIndicator by remember { mutableStateOf(false) }
+    var brightnessLevel by remember {
+        mutableFloatStateOf(
+            activity?.window?.attributes?.screenBrightness?.takeIf { it in 0f..1f } ?: 0.5f
+        )
+    }
+    var showBrightnessIndicator by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showVolumeIndicator) {
+        if (showVolumeIndicator) {
+            delay(900)
+            showVolumeIndicator = false
+        }
+    }
+    LaunchedEffect(showBrightnessIndicator) {
+        if (showBrightnessIndicator) {
+            delay(900)
+            showBrightnessIndicator = false
+        }
+    }
+
+    val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            val media = MediaItem.fromUri(videoItem.uri)
-            setMediaItem(media)
-            prepare()
             playWhenReady = true
         }
+    }
+
+    // Load whichever video is current (handles both the initial load and Next/Previous)
+    LaunchedEffect(videoItem.id) {
+        exoPlayer.setMediaItem(MediaItem.fromUri(videoItem.uri))
+        exoPlayer.prepare()
+        exoPlayer.play()
+        currentPosition = 0L
+        totalDuration = videoItem.durationMs
+        videoScale = 1f
+    }
+
+    fun goToNext() {
+        if (currentIndex < videoList.lastIndex) currentIndex++
+    }
+
+    fun goToPrevious() {
+        if (currentIndex > 0) currentIndex--
     }
 
     DisposableEffect(Unit) {
@@ -163,7 +219,6 @@ fun VideoPlayerScreen(
 
         onDispose {
             exoPlayer.removeListener(listener)
-            exoPlayer.stop()
             exoPlayer.release()
         }
     }
@@ -181,16 +236,82 @@ fun VideoPlayerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
+            .pointerInput(isControlsLocked, videoList.size) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val isRightHalf = down.position.x > size.width / 2f
+                    var isVerticalDrag = false
+                    var isHorizontalDrag = false
+                    var isMultiTouch = false
+                    var totalDx = 0f
+                    var totalDy = 0f
+                    var moved = false
+                    var event = awaitPointerEvent()
+
+                    do {
+                        val pointerCount = event.changes.size
+
+                        if (pointerCount >= 2) {
+                            isMultiTouch = true
+                            if (!isControlsLocked) {
+                                val zoomChange = event.calculateZoom()
+                                videoScale = (videoScale * zoomChange).coerceIn(1f, 3f)
+                            }
+                            event.changes.forEach { it.consume() }
+                        } else if (!isMultiTouch) {
+                            val change = event.changes[0]
+                            val delta = change.positionChange()
+                            totalDx += delta.x
+                            totalDy += delta.y
+                            if (abs(delta.x) > 0.5f || abs(delta.y) > 0.5f) moved = true
+
+                            if (!isVerticalDrag && !isHorizontalDrag && !isControlsLocked) {
+                                if (abs(totalDy) > 18f && abs(totalDy) > abs(totalDx)) {
+                                    isVerticalDrag = true
+                                } else if (abs(totalDx) > 24f && abs(totalDx) > abs(totalDy)) {
+                                    isHorizontalDrag = true
+                                }
+                            }
+
+                            if (isVerticalDrag) {
+                                change.consume()
+                                if (isRightHalf) {
+                                    val sensitivity = maxVolume / 350f
+                                    volumeLevel = (volumeLevel - delta.y * sensitivity).coerceIn(0f, maxVolume.toFloat())
+                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volumeLevel.toInt(), 0)
+                                    showVolumeIndicator = true
+                                } else {
+                                    val window = activity?.window
+                                    if (window != null) {
+                                        brightnessLevel = (brightnessLevel - delta.y / 500f).coerceIn(0.02f, 1f)
+                                        val params = window.attributes
+                                        params.screenBrightness = brightnessLevel
+                                        window.attributes = params
+                                        showBrightnessIndicator = true
+                                    }
+                                }
+                            } else if (isHorizontalDrag) {
+                                change.consume()
+                            }
+                        }
+                        event = awaitPointerEvent()
+                    } while (event.changes.any { it.pressed })
+
+                    if (!isMultiTouch && !moved) {
+                        // Simple tap: toggle controls
                         if (!isControlsLocked) {
                             showControls = !showControls
                         } else {
-                            showControls = true // Allow unlocking
+                            showControls = true
+                        }
+                    } else if (isHorizontalDrag && !isControlsLocked) {
+                        if (totalDx < -120f) {
+                            goToNext()
+                        } else if (totalDx > 120f) {
+                            goToPrevious()
                         }
                     }
-                )
+                }
             }
     ) {
         // Player Surface View
@@ -208,23 +329,43 @@ fun VideoPlayerScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(scaleX = zoom, scaleY = zoom, rotationZ = rotation)
-                .pointerInput(zoom) {
-                    if (zoom > 1f) {
-                        detectTransformGestures { _, pan, gestureZoom, gestureRotation ->
-                            zoom = (zoom * gestureZoom).coerceIn(1f, 4f)
-                            rotation += gestureRotation
-                        }
-                    }
-                }
+                .graphicsLayer(scaleX = videoScale, scaleY = videoScale)
         )
+
+        // Volume indicator overlay
+        AnimatedVisibility(
+            visible = showVolumeIndicator,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            GestureIndicator(
+                icon = Icons.Default.VolumeUp,
+                progress = if (maxVolume > 0) volumeLevel / maxVolume else 0f,
+                label = "Volume"
+            )
+        }
+
+        // Brightness indicator overlay
+        AnimatedVisibility(
+            visible = showBrightnessIndicator,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            GestureIndicator(
+                icon = Icons.Default.Brightness6,
+                progress = brightnessLevel,
+                label = "Brightness"
+            )
+        }
 
         // Top App Bar
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+            modifier = Modifier.align(Alignment.TopCenter)
         ) {
             TopAppBar(
                 title = {
@@ -252,13 +393,27 @@ fun VideoPlayerScreen(
                     // Lock Toggle
                     IconButton(onClick = { isControlsLocked = !isControlsLocked }) {
                         Icon(
-                            imageVector = if (isControlsLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                            if (isControlsLocked) Icons.Default.Lock else Icons.Default.LockOpen,
                             contentDescription = "Lock Controls",
                             tint = if (isControlsLocked) SultanGold else Color.White
                         )
                     }
 
                     if (!isControlsLocked) {
+                        // Rotate / orientation toggle
+                        IconButton(onClick = {
+                            activity?.let {
+                                isLandscape = !isLandscape
+                                it.requestedOrientation = if (isLandscape) {
+                                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                } else {
+                                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Default.ScreenRotation, contentDescription = "Rotate", tint = Color.White)
+                        }
+
                         // Extract Frame Button
                         IconButton(onClick = {
                             scope.launch {
@@ -296,31 +451,6 @@ fun VideoPlayerScreen(
                             }
                         }
 
-                        IconButton(onClick = { zoom = (zoom + 0.25f).coerceAtMost(4f) }) {
-                            Icon(Icons.Default.ZoomIn, contentDescription = "Zoom in", tint = Color.White)
-                        }
-                        IconButton(onClick = { zoom = (zoom - 0.25f).coerceAtLeast(1f) }) {
-                            Icon(Icons.Default.ZoomOut, contentDescription = "Zoom out", tint = Color.White)
-                        }
-                        IconButton(onClick = { rotation = (rotation + 90f) % 360f }) {
-                            Icon(Icons.Default.RotateRight, contentDescription = "Rotate", tint = Color.White)
-                        }
-                        IconButton(onClick = {
-                            val am = context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
-                            am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                        }) {
-                            Icon(Icons.Default.VolumeUp, contentDescription = "Volume up", tint = Color.White)
-                        }
-                        IconButton(onClick = {
-                            brightness = (brightness + 0.1f).coerceAtMost(1f)
-                            activity?.let { a ->
-                                val attrs = a.window.attributes
-                                attrs.screenBrightness = brightness
-                                a.window.attributes = attrs
-                            }
-                        }) {
-                            Icon(Icons.Default.Brightness6, contentDescription = "Brightness", tint = Color.White)
-                        }
                         IconButton(onClick = { showDetailsDialog = true }) {
                             Icon(Icons.Default.Info, contentDescription = "Details", tint = Color.White)
                         }
@@ -332,7 +462,7 @@ fun VideoPlayerScreen(
             )
         }
 
-        // Center Playback Skip / Play / Pause Controls
+        // Center Playback Skip / Play / Pause / Previous / Next Controls
         AnimatedVisibility(
             visible = showControls && !isControlsLocked,
             enter = fadeIn(),
@@ -341,8 +471,22 @@ fun VideoPlayerScreen(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(28.dp)
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
             ) {
+                // Previous video
+                IconButton(
+                    onClick = { goToPrevious() },
+                    enabled = currentIndex > 0,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.SkipPrevious,
+                        contentDescription = "Previous Video",
+                        tint = if (currentIndex > 0) Color.White else Color.Gray,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+
                 // Rewind 10s
                 IconButton(
                     onClick = { exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0)) },
@@ -359,7 +503,7 @@ fun VideoPlayerScreen(
                     modifier = Modifier.size(68.dp).background(SultanGold, CircleShape)
                 ) {
                     Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = "Play/Pause",
                         tint = Color.Black,
                         modifier = Modifier.size(40.dp)
@@ -373,6 +517,20 @@ fun VideoPlayerScreen(
                 ) {
                     Icon(Icons.Default.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(32.dp))
                 }
+
+                // Next video
+                IconButton(
+                    onClick = { goToNext() },
+                    enabled = currentIndex < videoList.lastIndex,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.SkipNext,
+                        contentDescription = "Next Video",
+                        tint = if (currentIndex < videoList.lastIndex) Color.White else Color.Gray,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
             }
         }
 
@@ -381,7 +539,7 @@ fun VideoPlayerScreen(
             visible = showControls && !isControlsLocked,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Column(
                 modifier = Modifier
@@ -429,30 +587,29 @@ fun VideoPlayerScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(enabled = hasPrevious, onClick = { if (hasPrevious) onNavigateToVideo(videoList[currentVideoIndex - 1].id) }) {
-                        Icon(Icons.Default.SkipPrevious, contentDescription = "Previous video", tint = if (hasPrevious) Color.White else Color.Gray)
-                    }
                     IconButton(onClick = { viewModel.repository.shareMedia(videoItem.uri, videoItem.mimeType) }) {
                         Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
                     }
                     IconButton(onClick = { viewModel.toggleFavorite(videoItem) }) {
                         Icon(
-                            imageVector = if (videoItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            if (videoItem.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorite",
                             tint = if (videoItem.isFavorite) SultanGold else Color.White
                         )
                     }
                     IconButton(onClick = {
                         scope.launch {
+                            val wasLast = videoList.size <= 1
                             viewModel.repository.moveToTrash(videoItem)
                             viewModel.showMessage("Video moved to Trash")
-                            onNavigateBack()
+                            if (wasLast) {
+                                onNavigateBack()
+                            } else if (currentIndex >= videoList.lastIndex) {
+                                goToPrevious()
+                            }
                         }
                     }) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
-                    }
-                    IconButton(enabled = hasNext, onClick = { if (hasNext) onNavigateToVideo(videoList[currentVideoIndex + 1].id) }) {
-                        Icon(Icons.Default.SkipNext, contentDescription = "Next video", tint = if (hasNext) Color.White else Color.Gray)
                     }
                 }
             }
@@ -463,6 +620,39 @@ fun VideoPlayerScreen(
                 item = videoItem,
                 onDismiss = { showDetailsDialog = false }
             )
+        }
+    }
+}
+
+@Composable
+private fun GestureIndicator(
+    icon: ImageVector,
+    progress: Float,
+    label: String
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(28.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .width(90.dp)
+                    .height(4.dp)
+                    .background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(4.dp)
+                        .background(SultanGold, RoundedCornerShape(2.dp))
+                )
+            }
         }
     }
 }

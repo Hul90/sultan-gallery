@@ -36,8 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
-import coil.request.videoFrameMillis
 import com.example.data.model.MediaItem
 import com.example.ui.theme.SultanGold
 
@@ -95,8 +95,8 @@ fun MediaThumbnail(
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(item.uri)
-                    .apply { if (item.isVideo) videoFrameMillis(1_000) }
                     .crossfade(true)
+                    .apply { if (item.isVideo) decoderFactory(VideoFrameDecoder.Factory()) }
                     .build(),
                 contentDescription = item.displayName,
                 contentScale = ContentScale.Crop,

@@ -107,6 +107,8 @@ fun PhotoEditorScreen(
     val scope = rememberCoroutineScope()
     val state by editorViewModel.uiState.collectAsStateWithLifecycle()
 
+    com.example.ui.components.ImmersiveMode(enabled = true)
+
     var showTextDialog by remember { mutableStateOf(false) }
     var textInput by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }

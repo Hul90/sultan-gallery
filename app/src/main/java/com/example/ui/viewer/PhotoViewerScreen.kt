@@ -5,8 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +16,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
@@ -54,6 +53,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.calculatePan
+import androidx.compose.ui.input.pointer.util.calculateZoom
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.MediaItem
+import com.example.ui.components.ImmersiveMode
 import com.example.ui.components.MediaDetailsDialog
 import com.example.ui.gallery.GalleryViewModel
 import com.example.ui.theme.SultanGold
@@ -94,10 +97,13 @@ fun PhotoViewerScreen(
         return
     }
 
+    ImmersiveMode(enabled = true)
+
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { photos.size })
     val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
     var showControls by remember { mutableStateOf(true) }
     var showDetailsDialog by remember { mutableStateOf(false) }
+    var isCurrentPageZoomed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -108,12 +114,16 @@ fun PhotoViewerScreen(
     ) {
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = !isCurrentPageZoomed,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val photo = photos[page]
             ZoomablePhotoItem(
                 photo = photo,
-                onTap = { showControls = !showControls }
+                onTap = { showControls = !showControls },
+                onZoomChanged = { zoomed ->
+                    if (page == pagerState.currentPage) isCurrentPageZoomed = zoomed
+                }
             )
         }
 
@@ -122,7 +132,7 @@ fun PhotoViewerScreen(
             visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+            modifier = Modifier.align(Alignment.TopCenter)
         ) {
             TopAppBar(
                 title = {
@@ -186,7 +196,7 @@ fun PhotoViewerScreen(
             visible = showControls,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Row(
                 modifier = Modifier
@@ -262,11 +272,16 @@ fun PhotoViewerScreen(
 private fun ZoomablePhotoItem(
     photo: MediaItem,
     onTap: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(scale) {
+        onZoomChanged(scale > 1.05f)
+    }
 
     val isPdf = photo.mimeType == "application/pdf" || photo.displayName.endsWith(".pdf", ignoreCase = true)
     var pdfPageIndex by remember { mutableStateOf(0) }
@@ -296,16 +311,36 @@ private fun ZoomablePhotoItem(
                     }
                 )
             }
-            .pointerInput(scale) {
-                if (scale > 1f) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
-                            offset = Offset(offset.x + pan.x, offset.y + pan.y)
-                        } else {
-                            offset = Offset.Zero
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var event = awaitPointerEvent()
+                    do {
+                        val pointerCount = event.changes.size
+                        if (pointerCount >= 2) {
+                            // Real pinch: always handle zoom + pan, consume so the
+                            // pager never sees it.
+                            val zoomChange = event.calculateZoom()
+                            scale = (scale * zoomChange).coerceIn(1f, 5f)
+                            val panChange = event.calculatePan()
+                            offset = if (scale > 1f) {
+                                Offset(offset.x + panChange.x, offset.y + panChange.y)
+                            } else {
+                                Offset.Zero
+                            }
+                            event.changes.forEach { it.consume() }
+                        } else if (scale > 1f) {
+                            // Already zoomed in: a single finger pans the image
+                            // instead of swiping to the next/previous photo.
+                            val change = event.changes[0]
+                            val delta = change.positionChange()
+                            offset = Offset(offset.x + delta.x, offset.y + delta.y)
+                            change.consume()
                         }
-                    }
+                        // else: single finger at scale=1 — don't consume, let the
+                        // HorizontalPager handle the swipe to the next/previous photo.
+                        event = awaitPointerEvent()
+                    } while (event.changes.any { it.pressed })
                 }
             },
         contentAlignment = Alignment.Center
