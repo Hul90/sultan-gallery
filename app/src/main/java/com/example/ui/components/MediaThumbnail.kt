@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
+import coil.request.CachePolicy
 import com.example.data.model.MediaItem
 import com.example.ui.theme.SultanGold
 
@@ -95,7 +96,9 @@ fun MediaThumbnail(
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(item.uri)
-                    .crossfade(true)
+                    .crossfade(false)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
                     .apply { if (item.isVideo) decoderFactory(VideoFrameDecoder.Factory()) }
                     .build(),
                 contentDescription = item.displayName,

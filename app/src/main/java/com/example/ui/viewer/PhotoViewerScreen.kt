@@ -1,7 +1,11 @@
 package com.example.ui.viewer
 
+import android.app.Activity
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
@@ -90,6 +96,7 @@ fun PhotoViewerScreen(
     viewModel: GalleryViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToEditor: (Uri) -> Unit,
+    onNavigateToTools: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -139,6 +146,24 @@ fun PhotoViewerScreen(
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // Some photos (screenshots, downloads, WhatsApp/browser saves, etc.) aren't
+    // owned by this app. On Android 10+ MediaStore refuses to rename/move/rotate
+    // them until the user approves a system prompt. When a repository call comes
+    // back asking for that permission, we stash what to retry and launch the
+    // prompt; if the user approves it we simply run the same action again.
+    var pendingRetry by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val retry = pendingRetry
+        pendingRetry = null
+        if (result.resultCode == Activity.RESULT_OK && retry != null) {
+            scope.launch { retry() }
+        } else if (retry != null) {
+            viewModel.showMessage("Permission needed to modify this file")
+        }
+    }
 
     Box(
         modifier = modifier
@@ -211,13 +236,15 @@ fun PhotoViewerScreen(
                     IconButton(onClick = { showDetailsDialog = true }) {
                         Icon(Icons.Default.Info, contentDescription = "Details", tint = Color.White)
                     }
-                    IconButton(onClick = {
-                        scope.launch {
-                            viewModel.repository.setAsWallpaper(currentPhoto.uri)
-                            viewModel.showMessage("Wallpaper updated")
-                        }
-                    }) {
-                        Icon(Icons.Default.Wallpaper, contentDescription = "Set Wallpaper", tint = Color.White)
+                    // Open Sultan Tools for the currently viewed image. The tools screen
+                    // will preselect this file so the user can immediately add more files
+                    // from the desired folder.
+                    IconButton(onClick = onNavigateToTools) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = "Sultan Tools",
+                            tint = SultanGold
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -257,11 +284,22 @@ fun PhotoViewerScreen(
 
                 // Unique action: Rotate & Save
                 IconButton(onClick = {
-                    scope.launch {
-                        val ok = viewModel.repository.rotateAndSave(currentPhoto)
-                        viewModel.showMessage(if (ok) "Rotated and saved" else "Could not rotate image")
-                        if (ok) viewModel.refreshMedia()
+                    val photoToRotate = currentPhoto
+                    suspend fun attemptRotate() {
+                        val result = viewModel.repository.rotateAndSave(photoToRotate)
+                        when {
+                            result.success -> {
+                                viewModel.showMessage("Rotated and saved")
+                                viewModel.refreshMedia()
+                            }
+                            result.intentSender != null -> {
+                                pendingRetry = { attemptRotate() }
+                                permissionLauncher.launch(IntentSenderRequest.Builder(result.intentSender).build())
+                            }
+                            else -> viewModel.showMessage("Could not rotate image")
+                        }
                     }
+                    scope.launch { attemptRotate() }
                 }) {
                     Icon(Icons.Default.AutoAwesome, contentDescription = "Rotate and save", tint = SultanGold)
                 }
@@ -351,11 +389,22 @@ fun PhotoViewerScreen(
                         val base = renameText.trim()
                         if (base.isNotEmpty()) {
                             showRenameDialog = false
-                            scope.launch {
-                                val ok = viewModel.repository.renameMedia(currentPhoto, base)
-                                viewModel.showMessage(if (ok) "Renamed successfully" else "Rename failed")
-                                viewModel.refreshMedia()
+                            val photoToRename = currentPhoto
+                            suspend fun attemptRename() {
+                                val result = viewModel.repository.renameMedia(photoToRename, base)
+                                when {
+                                    result.success -> {
+                                        viewModel.showMessage("Renamed successfully")
+                                        viewModel.refreshMedia()
+                                    }
+                                    result.intentSender != null -> {
+                                        pendingRetry = { attemptRename() }
+                                        permissionLauncher.launch(IntentSenderRequest.Builder(result.intentSender).build())
+                                    }
+                                    else -> viewModel.showMessage("Rename failed")
+                                }
                             }
+                            scope.launch { attemptRename() }
                         }
                     }) { Text("Rename") }
                 },
@@ -371,11 +420,30 @@ fun PhotoViewerScreen(
                 onDismiss = { showAlbumDialog = false },
                 onConfirm = { album ->
                     showAlbumDialog = false
-                    scope.launch {
-                        val target = album.relativePath.ifBlank { album.name }
-                        val ok = if (albumDialogCopy) viewModel.repository.copyToAlbum(currentPhoto, target) else viewModel.repository.moveToAlbum(currentPhoto, target)
-                        viewModel.showMessage(if (ok) (if (albumDialogCopy) "Copied to $target" else "Moved to $target") else "Album operation failed")
-                        viewModel.refreshMedia()
+                    val target = album.relativePath.ifBlank { album.name }
+                    val photoToMove = currentPhoto
+                    if (albumDialogCopy) {
+                        scope.launch {
+                            val ok = viewModel.repository.copyToAlbum(photoToMove, target)
+                            viewModel.showMessage(if (ok) "Copied to $target" else "Copy failed")
+                            viewModel.refreshMedia()
+                        }
+                    } else {
+                        suspend fun attemptMove() {
+                            val result = viewModel.repository.moveToAlbum(photoToMove, target)
+                            when {
+                                result.success -> {
+                                    viewModel.showMessage("Moved to $target")
+                                    viewModel.refreshMedia()
+                                }
+                                result.intentSender != null -> {
+                                    pendingRetry = { attemptMove() }
+                                    permissionLauncher.launch(IntentSenderRequest.Builder(result.intentSender).build())
+                                }
+                                else -> viewModel.showMessage("Move failed")
+                            }
+                        }
+                        scope.launch { attemptMove() }
                     }
                 }
             )
@@ -402,13 +470,7 @@ fun PhotoViewerScreen(
         if (showDetailsDialog) {
             MediaDetailsDialog(
                 item = currentPhoto,
-                onDismiss = { showDetailsDialog = false },
-                onSetWallpaper = {
-                    scope.launch {
-                        viewModel.repository.setAsWallpaper(currentPhoto.uri)
-                        viewModel.showMessage("Wallpaper updated")
-                    }
-                }
+                onDismiss = { showDetailsDialog = false }
             )
         }
     }

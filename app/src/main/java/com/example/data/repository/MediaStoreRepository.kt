@@ -2,6 +2,9 @@ package com.example.data.repository
 
 import android.app.WallpaperManager
 import android.content.ContentResolver
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -29,14 +32,40 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MediaStoreRepository(
     private val context: Context,
     private val dao: SultanDao
 ) {
+    private val cachePrefs = context.getSharedPreferences("sultan_media_cache", Context.MODE_PRIVATE)
+
     val favoriteUris: Flow<List<String>> = dao.getAllFavoriteUris()
     val trashEntities: Flow<List<TrashEntity>> = dao.getAllTrash()
     val vaultEntities: Flow<List<VaultEntity>> = dao.getAllVaultItems()
+
+    private var mediaObserver: ContentObserver? = null
+
+    fun startMediaObserver(onChanged: () -> Unit) {
+        if (mediaObserver != null) return
+        mediaObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                onChanged()
+            }
+        }.also { observer ->
+            val resolver = context.contentResolver
+            resolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer)
+            resolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer)
+            resolver.registerContentObserver(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true, observer)
+            resolver.registerContentObserver(MediaStore.Files.getContentUri("external"), true, observer)
+        }
+    }
+
+    fun stopMediaObserver() {
+        mediaObserver?.let { context.contentResolver.unregisterContentObserver(it) }
+        mediaObserver = null
+    }
 
     suspend fun loadAllMedia(includeAudio: Boolean = true): List<MediaItem> = withContext(Dispatchers.IO) {
         val mediaList = mutableListOf<MediaItem>()
@@ -438,7 +467,117 @@ class MediaStoreRepository(
         }
 
         mediaList.sortByDescending { it.dateAdded }
+        saveMediaCache(mediaList, includeAudio)
         mediaList
+    }
+
+    /** Fast startup path: restore the last successful MediaStore scan immediately. */
+    suspend fun loadCachedMedia(includeAudio: Boolean = true): List<MediaItem>? = withContext(Dispatchers.IO) {
+        val json = cachePrefs.getString(cacheKey(includeAudio), null) ?: return@withContext null
+        try {
+            val array = JSONArray(json)
+            val favSet = (dao.getAllFavoriteUris().firstOrNull() ?: emptyList()).toSet()
+            val result = ArrayList<MediaItem>(array.length())
+            for (i in 0 until array.length()) {
+                val o = array.getJSONObject(i)
+                result += MediaItem(
+                    id = o.getLong("id"),
+                    uri = Uri.parse(o.getString("uri")),
+                    displayName = o.getString("displayName"),
+                    path = o.optString("path"),
+                    dateAdded = o.optLong("dateAdded"),
+                    dateModified = o.optLong("dateModified"),
+                    size = o.optLong("size"),
+                    mimeType = o.optString("mimeType"),
+                    isVideo = o.optBoolean("isVideo"),
+                    isAudio = o.optBoolean("isAudio"),
+                    durationMs = o.optLong("durationMs"),
+                    width = o.optInt("width"),
+                    height = o.optInt("height"),
+                    bucketName = o.optString("bucketName"),
+                    bucketId = o.optString("bucketId"),
+                    isFavorite = favSet.contains(o.getString("uri"))
+                )
+            }
+            result
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * A cheap MediaStore fingerprint avoids rescanning thousands of rows every time
+     * the app is opened. A full scan happens only after this fingerprint changes.
+     */
+    suspend fun hasMediaStoreChanged(includeAudio: Boolean = true): Boolean = withContext(Dispatchers.IO) {
+        val saved = cachePrefs.getString(fingerprintKey(includeAudio), null)
+        if (saved == null) return@withContext true
+        currentMediaFingerprint(includeAudio) != saved
+    }
+
+    fun invalidateMediaCache() {
+        cachePrefs.edit()
+            .remove(cacheKey(true))
+            .remove(cacheKey(false))
+            .remove(fingerprintKey(true))
+            .remove(fingerprintKey(false))
+            .apply()
+    }
+
+    private fun cacheKey(includeAudio: Boolean) = if (includeAudio) "media_json_audio" else "media_json_no_audio"
+    private fun fingerprintKey(includeAudio: Boolean) = if (includeAudio) "media_fingerprint_audio" else "media_fingerprint_no_audio"
+
+    private fun saveMediaCache(mediaList: List<MediaItem>, includeAudio: Boolean) {
+        val array = JSONArray()
+        mediaList.forEach { item ->
+            array.put(JSONObject().apply {
+                put("id", item.id)
+                put("uri", item.uri.toString())
+                put("displayName", item.displayName)
+                put("path", item.path)
+                put("dateAdded", item.dateAdded)
+                put("dateModified", item.dateModified)
+                put("size", item.size)
+                put("mimeType", item.mimeType)
+                put("isVideo", item.isVideo)
+                put("isAudio", item.isAudio)
+                put("durationMs", item.durationMs)
+                put("width", item.width)
+                put("height", item.height)
+                put("bucketName", item.bucketName)
+                put("bucketId", item.bucketId)
+                put("isFavorite", item.isFavorite)
+            })
+        }
+        val fp = runCatching { currentMediaFingerprintBlocking(includeAudio) }.getOrNull()
+        cachePrefs.edit()
+            .putString(cacheKey(includeAudio), array.toString())
+            .apply { if (fp != null) putString(fingerprintKey(includeAudio), fp) }
+            .apply()
+    }
+
+    private suspend fun currentMediaFingerprint(includeAudio: Boolean): String = withContext(Dispatchers.IO) {
+        currentMediaFingerprintBlocking(includeAudio)
+    }
+
+    private fun currentMediaFingerprintBlocking(includeAudio: Boolean): String {
+        val uri = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            "COUNT(*) AS item_count",
+            "MAX(${MediaStore.Files.FileColumns.DATE_MODIFIED}) AS latest_modified",
+            "SUM(${MediaStore.Files.FileColumns.SIZE}) AS total_size"
+        )
+        return try {
+            context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use "0|0|0|$includeAudio"
+                val count = cursor.getLong(0)
+                val latest = cursor.getLong(1)
+                val total = cursor.getLong(2)
+                "$count|$latest|$total|$includeAudio"
+            } ?: "query_failed|$includeAudio"
+        } catch (_: Exception) {
+            "query_failed|$includeAudio"
+        }
     }
 
     suspend fun toggleFavorite(mediaItem: MediaItem): Boolean = withContext(Dispatchers.IO) {
@@ -473,12 +612,14 @@ class MediaStoreRepository(
                 deletedTimestamp = System.currentTimeMillis()
             )
         )
+        invalidateMediaCache()
     }
 
     suspend fun restoreFromTrash(trashEntity: TrashEntity) = withContext(Dispatchers.IO) {
         // Nothing is removed from MediaStore until permanent deletion, so
         // restoring is simply removing the app's hidden-trash marker.
         dao.deleteTrashItem(trashEntity.uriString)
+        invalidateMediaCache()
     }
 
     suspend fun permanentlyDeleteTrash(trashEntity: TrashEntity): TrashDeleteResult = withContext(Dispatchers.IO) {
@@ -727,15 +868,39 @@ class MediaStoreRepository(
         null
     }
 
-    suspend fun renameMedia(item: MediaItem, newBaseName: String): Boolean = withContext(Dispatchers.IO) {
+    // Returned by any operation that calls contentResolver.update()/delete() on a
+    // MediaStore item this app did not create. On Android 10+ (scoped storage) the
+    // OS throws RecoverableSecurityException for such items instead of silently
+    // succeeding; the fix is to surface the system's IntentSender to the UI so it
+    // can show the "Allow app to modify this file?" dialog, then simply retry the
+    // exact same call once the user approves it.
+    data class MediaWriteResult(
+        val success: Boolean,
+        val intentSender: android.content.IntentSender? = null,
+        val error: String? = null
+    )
+
+    private fun securityIntentSenderOrNull(e: android.app.RecoverableSecurityException): android.content.IntentSender? {
+        return runCatching { e.userAction.actionIntent.intentSender }.getOrNull()
+    }
+
+    suspend fun renameMedia(item: MediaItem, newBaseName: String): MediaWriteResult = withContext(Dispatchers.IO) {
         try {
             val extension = item.displayName.substringAfterLast('.', "")
             val safeBase = newBaseName.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            if (safeBase.isBlank()) return@withContext false
+            if (safeBase.isBlank()) return@withContext MediaWriteResult(false, error = "Enter a valid name")
             val newName = if (extension.isBlank()) safeBase else "$safeBase.$extension"
             val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, newName) }
-            context.contentResolver.update(item.uri, values, null, null) > 0
-        } catch (_: Exception) { false }
+            val rows = context.contentResolver.update(item.uri, values, null, null)
+            MediaWriteResult(rows > 0)
+        } catch (e: android.app.RecoverableSecurityException) {
+            val sender = securityIntentSenderOrNull(e)
+            if (sender != null) MediaWriteResult(false, intentSender = sender)
+            else MediaWriteResult(false, error = e.message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            MediaWriteResult(false, error = e.message)
+        }
     }
 
     private fun normalizeAlbumPath(albumName: String, isVideo: Boolean): String {
@@ -749,28 +914,36 @@ class MediaStoreRepository(
         return if (safe.equals(root, true) || safe.startsWith("$root/", true) || safe.startsWith("DCIM/", true)) safe else "$root/$safe"
     }
 
-    suspend fun moveToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun moveToAlbum(item: MediaItem, albumName: String): MediaWriteResult = withContext(Dispatchers.IO) {
         try {
             val cleanAlbum = normalizeAlbumPath(albumName, item.isVideo)
-            if (cleanAlbum.isBlank()) return@withContext false
+            if (cleanAlbum.isBlank()) return@withContext MediaWriteResult(false, error = "Choose an album")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, cleanAlbum)
                 }
-                context.contentResolver.update(item.uri, values, null, null) > 0
+                val rows = context.contentResolver.update(item.uri, values, null, null)
+                MediaWriteResult(rows > 0)
             } else {
                 val source = item.path
-                if (source.isBlank()) return@withContext false
+                if (source.isBlank()) return@withContext MediaWriteResult(false, error = "Missing file path")
                 val sourceFile = File(source)
                 val targetDir = File(Environment.getExternalStorageDirectory(), cleanAlbum)
                 if (!targetDir.exists()) targetDir.mkdirs()
                 val target = File(targetDir, item.displayName)
-                if (!sourceFile.renameTo(target)) return@withContext false
+                if (!sourceFile.renameTo(target)) return@withContext MediaWriteResult(false, error = "Could not move file")
                 MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(item.mimeType), null)
                 context.contentResolver.delete(item.uri, null, null)
-                true
+                MediaWriteResult(true)
             }
-        } catch (_: Exception) { false }
+        } catch (e: android.app.RecoverableSecurityException) {
+            val sender = securityIntentSenderOrNull(e)
+            if (sender != null) MediaWriteResult(false, intentSender = sender)
+            else MediaWriteResult(false, error = e.message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            MediaWriteResult(false, error = e.message)
+        }
     }
 
     suspend fun copyToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
@@ -796,11 +969,15 @@ class MediaStoreRepository(
                     context.contentResolver.update(newUri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
                 }
                 true
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                e.printStackTrace()
                 try { context.contentResolver.delete(newUri, null, null) } catch (_: Exception) {}
                 false
             }
-        } catch (_: Exception) { false }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
     suspend fun convertImageToPdf(item: MediaItem): Uri? = withContext(Dispatchers.IO) {
@@ -851,7 +1028,8 @@ class MediaStoreRepository(
                 }, null, null)
             }
             pdfUri
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            e.printStackTrace()
             pdfUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             null
         } finally {
@@ -859,10 +1037,10 @@ class MediaStoreRepository(
         }
     }
 
-    suspend fun rotateAndSave(item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+    suspend fun rotateAndSave(item: MediaItem): MediaWriteResult = withContext(Dispatchers.IO) {
         try {
             val source = context.contentResolver.openInputStream(item.uri)?.use { BitmapFactory.decodeStream(it) }
-                ?: return@withContext false
+                ?: return@withContext MediaWriteResult(false, error = "Could not read image")
             val matrix = android.graphics.Matrix().apply { postRotate(90f) }
             val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
             if (rotated !== source) source.recycle()
@@ -876,8 +1054,15 @@ class MediaStoreRepository(
                 )
             } ?: false
             rotated.recycle()
-            ok
-        } catch (_: Exception) { false }
+            MediaWriteResult(ok)
+        } catch (e: android.app.RecoverableSecurityException) {
+            val sender = securityIntentSenderOrNull(e)
+            if (sender != null) MediaWriteResult(false, intentSender = sender)
+            else MediaWriteResult(false, error = e.message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            MediaWriteResult(false, error = e.message)
+        }
     }
 
     suspend fun setAsWallpaper(uri: Uri): Boolean = withContext(Dispatchers.IO) {

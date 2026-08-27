@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,8 +52,7 @@ import java.util.Locale
 @Composable
 fun MediaDetailsDialog(
     item: MediaItem,
-    onDismiss: () -> Unit,
-    onSetWallpaper: (() -> Unit)? = null
+    onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
@@ -130,23 +128,11 @@ fun MediaDetailsDialog(
             }
         },
         confirmButton = {
-            Row {
-                if (!item.isVideo && !item.isAudio && onSetWallpaper != null) {
-                    OutlinedButton(onClick = {
-                        onSetWallpaper()
-                        onDismiss()
-                    }) {
-                        Icon(Icons.Default.Wallpaper, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
-                        Text("Wallpaper")
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = SultanGold)
-                ) {
-                    Text("Close", color = MaterialTheme.colorScheme.onPrimary)
-                }
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = SultanGold)
+            ) {
+                Text("Close", color = MaterialTheme.colorScheme.onPrimary)
             }
         }
     )

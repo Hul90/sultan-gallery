@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GridMode
+import com.example.data.model.FormatFilter
 import com.example.data.model.SortOrder
 import com.example.ui.theme.SultanGold
 
@@ -75,12 +77,15 @@ fun SultanTopBar(
     onSortOrderChange: (SortOrder) -> Unit,
     currentGridMode: GridMode,
     onGridModeChange: (GridMode) -> Unit,
+    currentFormatFilter: FormatFilter,
+    onFormatFilterChange: (FormatFilter) -> Unit,
     onNavigateToTools: () -> Unit,
     onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showGridMenu by remember { mutableStateOf(false) }
+    var showFormatMenu by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (isSelectionMode) {
@@ -233,6 +238,37 @@ fun SultanTopBar(
                                         onClick = {
                                             onGridModeChange(mode)
                                             showGridMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Format filter is kept in the top bar so the gallery stays clean.
+                        Box {
+                            IconButton(onClick = { showFormatMenu = true }) {
+                                Icon(
+                                    Icons.Default.FilterList,
+                                    contentDescription = "Filter by format",
+                                    tint = if (currentFormatFilter == FormatFilter.ALL) MaterialTheme.colorScheme.onSurface else SultanGold
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showFormatMenu,
+                                onDismissRequest = { showFormatMenu = false }
+                            ) {
+                                FormatFilter.values().forEach { filter ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = filter.label,
+                                                fontWeight = if (filter == currentFormatFilter) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (filter == currentFormatFilter) SultanGold else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        },
+                                        onClick = {
+                                            onFormatFilterChange(filter)
+                                            showFormatMenu = false
                                         }
                                     )
                                 }

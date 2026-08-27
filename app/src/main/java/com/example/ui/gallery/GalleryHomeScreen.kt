@@ -26,27 +26,31 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderShared
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PhotoAlbum
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material.icons.filled.ViewQuilt
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,14 +62,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -84,8 +91,8 @@ import com.example.data.model.MediaTab
 import com.example.ui.components.EmptyStateView
 import com.example.ui.components.MediaThumbnail
 import com.example.ui.components.SultanTopBar
-import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.SultanGold
+import kotlinx.coroutines.launch
 
 
 private fun hasMediaReadAccess(context: android.content.Context): Boolean {
@@ -147,10 +154,24 @@ fun GalleryHomeScreen(
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var moveCopyMode by remember { mutableStateOf<String?>(null) }
+    var pendingMoveCopyRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val moveCopyPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val retry = pendingMoveCopyRetry
+        pendingMoveCopyRetry = null
+        if (result.resultCode == android.app.Activity.RESULT_OK && retry != null) {
+            retry.invoke()
+        } else if (retry != null) {
+            viewModel.showMessage("Permission needed to move this media")
+        }
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        viewModel.refreshMedia()
+        viewModel.refreshMedia(forceFullScan = true)
     }
     val hasAccess = hasMediaReadAccess(context)
 
@@ -206,15 +227,23 @@ fun GalleryHomeScreen(
                 onSortOrderChange = { viewModel.setSortOrder(it) },
                 currentGridMode = state.gridMode,
                 onGridModeChange = { viewModel.setGridMode(it) },
-                onNavigateToTools = onNavigateToTools,
+                currentFormatFilter = state.formatFilter,
+                onFormatFilterChange = { viewModel.selectFormatFilter(it) },
+                onNavigateToTools = {
+                    viewModel.prepareToolSelection()
+                    onNavigateToTools()
+                },
                 onNavigateToSettings = onNavigateToSettings
             )
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+        ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
         ) {
             // Selected Album Header (if drilling into an album)
             if (state.selectedAlbum != null) {
@@ -254,22 +283,6 @@ fun GalleryHomeScreen(
                     }
                 )
 
-                // Compact folder/album strip so the gallery opens with real device folders visible.
-                if (state.albums.isNotEmpty()) {
-                    AlbumsQuickRow(
-                        albums = state.albums,
-                        onAlbumClick = { viewModel.selectAlbum(it) }
-                    )
-                }
-
-                // Format Filter Bar (Images, RAW, SVG, PSD, PDF, etc.)
-                FormatFilterRow(
-                    selectedFilter = state.formatFilter,
-                    onFilterSelected = { filter -> viewModel.selectFormatFilter(filter) }
-                )
-
-                // Quick Tools Header Bar
-                QuickToolsBar(onNavigateToTools = onNavigateToTools)
             }
 
             if (hasLimitedVisualAccess(context)) {
@@ -338,7 +351,7 @@ fun GalleryHomeScreen(
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
-                    contentPadding = PaddingValues(4.dp),
+                    contentPadding = PaddingValues(start = 4.dp, top = 4.dp, end = 4.dp, bottom = if (state.isSelectionMode) 96.dp else 4.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(
@@ -376,93 +389,108 @@ fun GalleryHomeScreen(
                 }
             }
         }
+
+        if (state.isSelectionMode) {
+            SultanQuickPanel(
+                selectedCount = state.selectedItemIds.size,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                onTools = {
+                    viewModel.prepareToolSelection()
+                    onNavigateToTools()
+                },
+                onShare = { viewModel.batchShareSelected() },
+                onMove = { moveCopyMode = "MOVE" },
+                onCopy = { moveCopyMode = "COPY" },
+                onDelete = { viewModel.batchTrashSelected() }
+            )
+        }
+
+        val currentMoveCopyMode = moveCopyMode
+        if (currentMoveCopyMode != null) {
+            MoveCopyAlbumDialog(
+                mode = currentMoveCopyMode,
+                albums = state.albums,
+                onDismiss = { moveCopyMode = null },
+                onAlbumSelected = { album ->
+                    val selected = state.selectedItems.toList()
+                    val mode = currentMoveCopyMode
+                    moveCopyMode = null
+                    if (selected.isNotEmpty()) {
+                        suspend fun runBatch(startIndex: Int) {
+                            var index = startIndex
+                            var success = 0
+                            while (index < selected.size) {
+                                val item = selected[index]
+                                if (mode == "MOVE") {
+                                    val result = viewModel.repository.moveToAlbum(item, album.name)
+                                    if (result.intentSender != null) {
+                                        val retryIndex = index
+                                        pendingMoveCopyRetry = {
+                                            scope.launch { runBatch(retryIndex) }
+                                        }
+                                        moveCopyPermissionLauncher.launch(
+                                            IntentSenderRequest.Builder(result.intentSender).build()
+                                        )
+                                        return
+                                    }
+                                    if (result.success) success++
+                                } else if (viewModel.repository.copyToAlbum(item, album.name)) {
+                                    success++
+                                }
+                                index++
+                            }
+                            viewModel.clearSelection()
+                            viewModel.refreshMedia()
+                            viewModel.showMessage(
+                                if (mode == "MOVE") "$success item(s) moved to ${album.name}"
+                                else "$success item(s) copied to ${album.name}"
+                            )
+                        }
+                        scope.launch { runBatch(0) }
+                    }
+                }
+            )
+        }
+        }
     }
 }
 
 
 @Composable
-private fun AlbumsQuickRow(
+private fun MoveCopyAlbumDialog(
+    mode: String,
     albums: List<MediaAlbum>,
-    onAlbumClick: (MediaAlbum) -> Unit,
-    modifier: Modifier = Modifier
+    onDismiss: () -> Unit,
+    onAlbumSelected: (MediaAlbum) -> Unit
 ) {
-    val context = LocalContext.current
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Folders & Albums",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "${albums.size} folders",
-                style = MaterialTheme.typography.labelSmall,
-                color = SultanGold
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            albums.take(10).forEach { album ->
-                Surface(
-                    onClick = { onAlbumClick(album) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.width(104.dp)
-                ) {
-                    Column {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(72.dp)
-                                .background(Color.DarkGray),
-                            contentAlignment = Alignment.Center
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (mode == "MOVE") "Move to folder" else "Copy to folder") },
+        text = {
+            if (albums.isEmpty()) {
+                Text("No device folders are available.")
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.height(300.dp)) {
+                    lazyItems(albums, key = { it.id }) { album ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onAlbumSelected(album) }.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (album.coverUri != null) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(album.coverUri)
-                                        .crossfade(true)
-                                        .decoderFactory(VideoFrameDecoder.Factory())
-                                        .build(),
-                                    contentDescription = album.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(Icons.Default.Folder, contentDescription = null, tint = SultanGold, modifier = Modifier.size(34.dp))
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = SultanGold)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(album.name, fontWeight = FontWeight.Bold)
+                                Text("${album.itemCount} items", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        }
-                        Column(modifier = Modifier.padding(7.dp)) {
-                            Text(
-                                album.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "${album.itemCount} items",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 }
             }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = SultanGold)) { Text("Cancel", color = Color.Black) }
         }
-    }
+    )
 }
 
 @Composable
@@ -519,93 +547,6 @@ private fun MediaTabsRow(
 }
 
 @Composable
-private fun FormatFilterRow(
-    selectedFilter: com.example.data.model.FormatFilter,
-    onFilterSelected: (com.example.data.model.FormatFilter) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        com.example.data.model.FormatFilter.values().forEach { filter ->
-            val isSelected = selectedFilter == filter
-            Surface(
-                onClick = { onFilterSelected(filter) },
-                shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) SultanGold.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, SultanGold) else null
-            ) {
-                Text(
-                    text = filter.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) SultanGold else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickToolsBar(
-    onNavigateToTools: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        QuickToolPill("Sultan Tools", Icons.Default.AutoAwesome, SultanGold) { onNavigateToTools() }
-        QuickToolPill("Collage", Icons.Default.ViewQuilt, Color(0xFF06B6D4)) { onNavigateToTools() }
-        QuickToolPill("Compress", Icons.Default.Compress, Color(0xFF10B981)) { onNavigateToTools() }
-        QuickToolPill("Smart Crop", Icons.Default.Crop, Color(0xFFF43F5E)) { onNavigateToTools() }
-        QuickToolPill("Cleaner", Icons.Default.CleaningServices, Color(0xFF8B5CF6)) { onNavigateToTools() }
-    }
-}
-
-@Composable
-private fun QuickToolPill(
-    label: String,
-    icon: ImageVector,
-    accentColor: Color,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
-@Composable
 private fun AlbumsGridView(
     albums: List<MediaAlbum>,
     onAlbumClick: (MediaAlbum) -> Unit,
@@ -646,7 +587,7 @@ private fun AlbumsGridView(
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)
                                         .data(album.coverUri)
-                                        .crossfade(true)
+                                        .crossfade(false)
                                         .decoderFactory(VideoFrameDecoder.Factory())
                                         .build(),
                                     contentDescription = album.name,
@@ -713,3 +654,4 @@ private fun AlbumsGridView(
         }
     }
 }
+

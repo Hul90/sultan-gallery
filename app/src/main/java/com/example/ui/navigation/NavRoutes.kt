@@ -9,7 +9,7 @@ object NavRoutes {
     const val VIDEO_PLAYER = "video_player/{mediaId}"
     const val AUDIO_PLAYER = "audio_player/{mediaId}"
     const val PHOTO_EDITOR = "photo_editor?uri={uri}"
-    const val SULTAN_TOOLS = "sultan_tools"
+    const val SULTAN_TOOLS = "sultan_tools?mediaId={mediaId}"
     const val SECRET_VAULT = "secret_vault"
     const val TRASH = "trash"
     const val SETTINGS = "settings"
@@ -19,4 +19,5 @@ object NavRoutes {
     fun videoPlayer(mediaId: Long): String = "video_player/$mediaId"
     fun audioPlayer(mediaId: Long): String = "audio_player/$mediaId"
     fun photoEditor(uri: Uri): String = "photo_editor?uri=${Uri.encode(uri.toString())}"
+    fun sultanTools(mediaId: Long? = null): String = "sultan_tools?mediaId=${mediaId ?: -1L}"
 }

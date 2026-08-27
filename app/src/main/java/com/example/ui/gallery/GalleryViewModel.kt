@@ -17,6 +17,8 @@ import com.example.data.model.SortOrder
 import com.example.data.preferences.SultanPreferences
 import com.example.data.repository.MediaStoreRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -47,7 +49,8 @@ data class GalleryUiState(
     val isAmoled: Boolean = true,
     val isDark: Boolean = true,
     val showAudio: Boolean = true,
-    val userMessage: String? = null
+    val userMessage: String? = null,
+    val toolSelectionIds: Set<Long> = emptySet()
 ) {
     val selectedItems: List<MediaItem>
         get() = allMedia.filter { selectedItemIds.contains(it.id) }
@@ -55,6 +58,14 @@ data class GalleryUiState(
     val selectedTotalSize: Long
         get() = selectedItems.sumOf { it.size }
 }
+
+private data class GalleryPreferenceSnapshot(
+    val grid: GridMode,
+    val sort: SortOrder,
+    val amoled: Boolean,
+    val dark: Boolean,
+    val audio: Boolean
+)
 
 class GalleryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -64,11 +75,26 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private val _uiState = MutableStateFlow(GalleryUiState())
     val uiState: StateFlow<GalleryUiState> = _uiState.asStateFlow()
+    private var mediaRefreshJob: Job? = null
+    private var refreshInProgress = false
 
     init {
         observePreferences()
         observeTrashAndVault()
+        repository.startMediaObserver {
+            mediaRefreshJob?.cancel()
+            mediaRefreshJob = viewModelScope.launch {
+                delay(650)
+                refreshMedia()
+            }
+        }
         refreshMedia()
+    }
+
+    override fun onCleared() {
+        repository.stopMediaObserver()
+        mediaRefreshJob?.cancel()
+        super.onCleared()
     }
 
     private fun observePreferences() {
@@ -80,13 +106,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
                 preferences.isDarkTheme,
                 preferences.showAudio
             ) { grid, sort, amoled, dark, audio ->
+                GalleryPreferenceSnapshot(grid, sort, amoled, dark, audio)
+            }.combine(preferences.formatFilter) { snapshot, format ->
                 _uiState.update {
                     it.copy(
-                        gridMode = grid,
-                        sortOrder = sort,
-                        isAmoled = amoled,
-                        isDark = dark,
-                        showAudio = audio
+                        gridMode = snapshot.grid,
+                        sortOrder = snapshot.sort,
+                        isAmoled = snapshot.amoled,
+                        isDark = snapshot.dark,
+                        showAudio = snapshot.audio,
+                        formatFilter = format
                     )
                 }
                 applyFilterAndSort()
@@ -107,20 +136,47 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun refreshMedia() {
+    fun refreshMedia(forceFullScan: Boolean = false) {
+        if (refreshInProgress && !forceFullScan) return
+        refreshInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
-            _uiState.update { it.copy(isLoading = true) }
-            val media = repository.loadAllMedia(includeAudio = _uiState.value.showAudio)
-            val albums = repository.extractAlbums(media)
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    allMedia = media,
-                    albums = albums
-                )
+            try {
+                val includeAudio = _uiState.value.showAudio
+                val cached = repository.loadCachedMedia(includeAudio)
+
+                // Fast path: paint the last successful scan immediately.
+                if (cached != null) {
+                    val albums = repository.extractAlbums(cached)
+                    _uiState.update {
+                        it.copy(isLoading = false, allMedia = cached, albums = albums)
+                    }
+                    applyFilterAndSort()
+                } else {
+                    _uiState.update { it.copy(isLoading = true) }
+                }
+
+                // Never re-query thousands of rows unless MediaStore actually changed.
+                val changed = forceFullScan || cached == null || repository.hasMediaStoreChanged(includeAudio)
+                if (!changed) return@launch
+
+                val media = repository.loadAllMedia(includeAudio = includeAudio)
+                val albums = repository.extractAlbums(media)
+                _uiState.update {
+                    it.copy(isLoading = false, allMedia = media, albums = albums)
+                }
+                applyFilterAndSort()
+            } finally {
+                refreshInProgress = false
             }
-            applyFilterAndSort()
         }
+    }
+
+    fun prepareToolSelection() {
+        _uiState.update { it.copy(toolSelectionIds = it.selectedItemIds) }
+    }
+
+    fun clearToolSelection() {
+        _uiState.update { it.copy(toolSelectionIds = emptySet()) }
     }
 
     fun selectTab(tab: MediaTab) {
@@ -137,6 +193,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     fun selectFormatFilter(filter: com.example.data.model.FormatFilter) {
         _uiState.update { it.copy(formatFilter = filter) }
+        viewModelScope.launch { preferences.setFormatFilter(filter) }
         applyFilterAndSort()
     }
 

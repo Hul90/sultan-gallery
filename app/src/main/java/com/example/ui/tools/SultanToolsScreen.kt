@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +44,8 @@ import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -64,6 +70,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +86,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.MediaThumbnail
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.CropPreset
 import com.example.data.model.MediaItem
@@ -102,6 +110,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun SultanToolsScreen(
     galleryViewModel: GalleryViewModel,
+    initialMediaId: Long? = null,
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -111,6 +120,49 @@ fun SultanToolsScreen(
 
     var activeToolDialog by remember { mutableStateOf<String?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
+    var selectedFolderId by remember { mutableStateOf<String?>(null) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    LaunchedEffect(initialMediaId, state.allMedia, state.toolSelectionIds) {
+        if (state.allMedia.isNotEmpty() && selectedIds.isEmpty()) {
+            val requestedIds = if (initialMediaId != null && initialMediaId > 0L) {
+                setOf(initialMediaId)
+            } else {
+                state.toolSelectionIds
+            }
+            if (requestedIds.isNotEmpty()) {
+                val requested = state.allMedia.filter { requestedIds.contains(it.id) && !it.isAudio }
+                if (requested.isNotEmpty()) {
+                    selectedIds = requested.map { it.id }.toSet()
+                    selectedFolderId = requested.first().bucketId.ifBlank { requested.first().bucketName }
+                }
+                galleryViewModel.clearToolSelection()
+            }
+        }
+    }
+
+    val folderMedia = remember(state.allMedia, selectedFolderId, selectedIds) {
+        if (selectedFolderId == null) {
+            state.allMedia.filter { !it.isAudio }
+        } else {
+            state.allMedia.filter { item ->
+                !item.isAudio && (
+                    item.bucketId == selectedFolderId ||
+                    item.bucketName.equals(selectedFolderId, ignoreCase = true) ||
+                    selectedIds.contains(item.id)
+                )
+            }
+        }
+    }
+    val selectedMedia = remember(state.allMedia, selectedIds) {
+        state.allMedia.filter { selectedIds.contains(it.id) }
+    }
+    // Keep the selected files first, but retain the entire working folder so the user
+    // can add more photos without leaving Sultan Tools.
+    val workingMedia = remember(folderMedia, selectedMedia) {
+        if (selectedMedia.isEmpty()) folderMedia
+        else selectedMedia + folderMedia.filterNot { selectedIds.contains(it.id) }
+    }
 
     Scaffold(
         topBar = {
@@ -141,6 +193,101 @@ fun SultanToolsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
+            // Working-folder and file selector. This keeps the home gallery clean while
+            // still letting every tool operate on exactly the files the user chooses.
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, SultanGold.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = SultanGold)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Working Folder", fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (selectedFolderId == null) "All folders" else folderMedia.firstOrNull()?.bucketName ?: "Selected folder",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                            Text(
+                                "${selectedMedia.size} selected",
+                                color = if (selectedMedia.isNotEmpty()) SultanGold else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            if (selectedMedia.isNotEmpty()) {
+                                TextButton(onClick = { selectedIds = emptySet() }) {
+                                    Text("Clear", color = SultanGold, fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedFolderId == null,
+                                onClick = {
+                                    selectedFolderId = null
+                                    selectedIds = emptySet()
+                                },
+                                label = { Text("All Folders", fontSize = 11.sp) },
+                                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SultanGold.copy(alpha = 0.2f), selectedLabelColor = SultanGold)
+                            )
+                            state.albums.forEach { album ->
+                                FilterChip(
+                                    selected = selectedFolderId == album.id || selectedFolderId.equals(album.name, ignoreCase = true),
+                                    onClick = {
+                                        selectedFolderId = album.id
+                                        selectedIds = emptySet()
+                                    },
+                                    label = { Text(album.name, maxLines = 1, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SultanGold.copy(alpha = 0.2f), selectedLabelColor = SultanGold)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            if (selectedMedia.isNotEmpty()) "Selected files are used by the tools below." else "Select files below. If none are selected, the selected folder is used.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(4),
+                            modifier = Modifier.fillMaxWidth().height(210.dp),
+                            userScrollEnabled = true
+                        ) {
+                            gridItems(folderMedia, key = { item -> "tool_${item.id}_${item.uri}" }) { item ->
+                                val selected = selectedIds.contains(item.id)
+                                MediaThumbnail(
+                                    item = item,
+                                    isSelected = selected,
+                                    isSelectionMode = selectedIds.isNotEmpty(),
+                                    onClick = {
+                                        selectedIds = if (selected) selectedIds - item.id else selectedIds + item.id
+                                    },
+                                    onLongClick = {
+                                        selectedIds = if (selected) selectedIds - item.id else selectedIds + item.id
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Hero Banner
             item {
                 Card(
@@ -272,7 +419,7 @@ fun SultanToolsScreen(
                             Text("Choose any media item from your gallery:", style = MaterialTheme.typography.bodySmall)
                             Spacer(modifier = Modifier.height(8.dp))
                             LazyColumn(modifier = Modifier.height(260.dp)) {
-                                items(state.allMedia.take(30)) { item ->
+                                items(workingMedia.take(60)) { item ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -302,7 +449,7 @@ fun SultanToolsScreen(
             }
             "IMAGES_TO_PDF" -> {
                 ImagesToPdfDialog(
-                    mediaList = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                    mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
                     onDismiss = { activeToolDialog = null },
                     onGeneratePdf = { selectedItems ->
                         scope.launch {
@@ -324,7 +471,7 @@ fun SultanToolsScreen(
                 )
             }
             "COLLAGE" -> CollageDialog(
-                mediaList = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
                 onDismiss = { activeToolDialog = null },
                 onCollageCreated = { bmp ->
                     scope.launch {
@@ -336,7 +483,7 @@ fun SultanToolsScreen(
                 }
             )
             "COMPRESS" -> CompressorDialog(
-                mediaList = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
                 onDismiss = { activeToolDialog = null },
                 onCompress = { item, level ->
                     scope.launch {
@@ -350,7 +497,7 @@ fun SultanToolsScreen(
                 }
             )
             "CONTACT_SHEET" -> ContactSheetDialog(
-                mediaList = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
                 onDismiss = { activeToolDialog = null },
                 onGenerate = { items, cols ->
                     scope.launch {
@@ -363,25 +510,25 @@ fun SultanToolsScreen(
                 }
             )
             "DUPLICATES" -> DuplicatesDialog(
-                mediaList = state.allMedia,
+                mediaList = workingMedia,
                 onDismiss = { activeToolDialog = null },
                 onDelete = { item ->
                     galleryViewModel.trashMediaItem(item)
                 }
             )
             "LARGE_FILES" -> LargeFilesDialog(
-                mediaList = state.allMedia,
+                mediaList = workingMedia,
                 onDismiss = { activeToolDialog = null },
                 onDelete = { item ->
                     galleryViewModel.trashMediaItem(item)
                 }
             )
             "ORGANIZER" -> OrganizerDialog(
-                mediaList = state.allMedia,
+                mediaList = workingMedia,
                 onDismiss = { activeToolDialog = null }
             )
             "CONVERTER" -> ConverterDialog(
-                mediaList = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
                 onDismiss = { activeToolDialog = null },
                 onConvert = { item, fmt ->
                     scope.launch {

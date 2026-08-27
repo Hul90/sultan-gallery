@@ -84,7 +84,7 @@ fun SultanGalleryApp(
                             navController.navigate(NavRoutes.audioPlayer(mediaId))
                         },
                         onNavigateToTools = {
-                            navController.navigate(NavRoutes.SULTAN_TOOLS)
+                            navController.navigate(NavRoutes.sultanTools())
                         },
                         onNavigateToVault = {
                             navController.navigate(NavRoutes.SECRET_VAULT)
@@ -110,6 +110,9 @@ fun SultanGalleryApp(
                         onNavigateBack = { navController.popBackStack() },
                         onNavigateToEditor = { uri ->
                             navController.navigate(NavRoutes.photoEditor(uri))
+                        },
+                        onNavigateToTools = {
+                            navController.navigate(NavRoutes.sultanTools(mediaId))
                         }
                     )
                 }
@@ -123,7 +126,8 @@ fun SultanGalleryApp(
                     VideoPlayerScreen(
                         mediaId = mediaId,
                         viewModel = galleryViewModel,
-                        onNavigateBack = { navController.popBackStack() }
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToTools = { navController.navigate(NavRoutes.sultanTools(mediaId)) }
                     )
                 }
 
@@ -155,9 +159,14 @@ fun SultanGalleryApp(
                 }
 
                 // Sultan Tools Screen
-                composable(NavRoutes.SULTAN_TOOLS) {
+                composable(
+                    route = NavRoutes.SULTAN_TOOLS,
+                    arguments = listOf(navArgument("mediaId") { type = NavType.LongType; defaultValue = -1L })
+                ) { backStackEntry ->
+                    val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: -1L
                     SultanToolsScreen(
                         galleryViewModel = galleryViewModel,
+                        initialMediaId = mediaId.takeIf { it > 0L },
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }

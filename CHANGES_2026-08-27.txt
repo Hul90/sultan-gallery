@@ -1,0 +1,13 @@
+SULTAN GALLERY - BUILD FIX 3
+
+Fixed GitHub Actions compile errors from the previous premium build:
+- GalleryHomeScreen.kt: added missing Compose mutableStateOf/setValue imports.
+- GalleryHomeScreen.kt: moved kotlinx.coroutines.launch import to the import section.
+- GalleryHomeScreen.kt: fixed Move/Copy retry callback to use a non-suspending callback that launches the suspend batch operation safely.
+- GalleryHomeScreen.kt: fixed delegated-property smart-cast by snapshotting move/copy mode before the dialog.
+- GalleryHomeScreen.kt: fixed undefined start index by starting batch operations at index 0.
+- GalleryHomeScreen.kt: imported LazyColumn items with an alias to avoid conflict with LazyVerticalGrid items.
+- GalleryHomeScreen.kt: fixed the Scaffold/Box closing braces after the Move/Copy dialog block.
+- GalleryViewModel.kt: replaced unsupported 6-flow combine overload with a 5-flow snapshot combined with formatFilter.
+
+No intentional feature removals. Existing Sultan Tools, Quick Panel, format filter, cached startup and selection workflow are retained.

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.GridMode
+import com.example.data.model.FormatFilter
 import com.example.data.model.SortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -23,6 +24,7 @@ class SultanPreferences(private val context: Context) {
         private val KEY_GRID_MODE = stringPreferencesKey("grid_mode")
         private val KEY_SORT_ORDER = stringPreferencesKey("sort_order")
         private val KEY_SHOW_AUDIO = booleanPreferencesKey("show_audio")
+        private val KEY_FORMAT_FILTER = stringPreferencesKey("format_filter")
         private val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         private val KEY_VAULT_PIN = stringPreferencesKey("vault_pin")
         private val KEY_PLAYBACK_SPEED = floatPreferencesKey("playback_speed")
@@ -58,6 +60,11 @@ class SultanPreferences(private val context: Context) {
         prefs[KEY_SHOW_AUDIO] ?: true
     }
 
+    val formatFilter: Flow<FormatFilter> = context.dataStore.data.map { prefs ->
+        runCatching { FormatFilter.valueOf(prefs[KEY_FORMAT_FILTER] ?: FormatFilter.ALL.name) }
+            .getOrDefault(FormatFilter.ALL)
+    }
+
     val isOnboardingCompleted: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_ONBOARDING_COMPLETED] ?: false
     }
@@ -88,6 +95,10 @@ class SultanPreferences(private val context: Context) {
 
     suspend fun setShowAudio(enabled: Boolean) {
         context.dataStore.edit { it[KEY_SHOW_AUDIO] = enabled }
+    }
+
+    suspend fun setFormatFilter(filter: FormatFilter) {
+        context.dataStore.edit { it[KEY_FORMAT_FILTER] = filter.name }
     }
 
     suspend fun setOnboardingCompleted(completed: Boolean) {

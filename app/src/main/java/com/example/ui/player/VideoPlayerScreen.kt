@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
@@ -108,6 +109,7 @@ fun VideoPlayerScreen(
     mediaId: Long,
     viewModel: GalleryViewModel,
     onNavigateBack: () -> Unit,
+    onNavigateToTools: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -449,6 +451,10 @@ fun VideoPlayerScreen(
                                     )
                                 }
                             }
+                        }
+
+                        IconButton(onClick = onNavigateToTools) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Sultan Tools", tint = SultanGold)
                         }
 
                         IconButton(onClick = { showDetailsDialog = true }) {
