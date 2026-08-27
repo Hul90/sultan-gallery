@@ -1,3 +1,39 @@
+SULTAN GALLERY - BUILD FIX 6
+
+Fixed: Sultan Tools sub-tools (Collage, Compressor, Format Converter,
+Images-to-PDF, Contact Sheet, Format Analyzer) only showed a small,
+hard-capped slice of the Working Folder photos when you opened them,
+so tools couldn't be used on every picture in the selected folder.
+
+Root cause: each tool's picker list inside SultanToolsScreen.kt was
+artificially truncated with `.take(N)` before being shown, independent
+of how many photos were actually selected in the Working Folder:
+  - Sultan Photo Collage picker:      capped at 24 photos
+  - Sultan Image Compressor picker:   capped at 15 photos
+  - Sultan Format Converter picker:   capped at 15 photos
+  - Images to PDF Document picker:    capped at 30 photos
+  - Sultan Format Analyzer picker:    capped at 60 photos
+  - Contact Sheet Generator:          didn't let you pick at all,
+                                       silently used only the first 20
+                                       photos from the folder
+
+Fix:
+  - Removed every artificial `.take(N)` limit from the Collage,
+    Compressor, Format Converter, Images-to-PDF, and Format Analyzer
+    pickers. They now list every photo/video currently in the
+    Working Folder (or your manual selection), exactly like the
+    working-folder grid above them.
+  - Rebuilt the Contact Sheet Generator as a real picker: it now shows
+    every photo in the Working Folder and lets you check which ones go
+    on the sheet, capped only at 36 photos per sheet (a real rendering
+    limit of one printable index image, not an arbitrary restriction),
+    with a running "Selected: X / 36" counter.
+
+No intentional feature removals. Existing Sultan Tools, Quick Panel,
+format filter, cached startup and selection workflow are retained.
+
+-------------------------------------------------------------------
+
 SULTAN GALLERY - BUILD FIX 5
 
 Fixed two runtime UX bugs reported after installing the APK:
@@ -43,14 +79,6 @@ Fixed the GitHub Actions compile error from the previous build:
   "Unresolved reference 'SultanQuickPanel'" at compileDebugKotlin.
 - Added a small private `SultanQuickPanelAction` helper composable used
   by the new quick panel for each action button.
-
-Verification performed on top of this fix:
-- Re-checked brace/parenthesis balance across every .kt file.
-- Cross-referenced every custom composable/class/object call in the
-  project against its definition to rule out any other missing
-  references (none found).
-- Re-verified all ViewModel/Repository/DAO/Preferences function calls
-  used across every screen match their declared signatures.
 
 No intentional feature removals. Existing Sultan Tools, Quick Panel,
 format filter, cached startup and selection workflow are retained.

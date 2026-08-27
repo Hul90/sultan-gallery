@@ -419,7 +419,7 @@ fun SultanToolsScreen(
                             Text("Choose any media item from your gallery:", style = MaterialTheme.typography.bodySmall)
                             Spacer(modifier = Modifier.height(8.dp))
                             LazyColumn(modifier = Modifier.height(260.dp)) {
-                                items(workingMedia.take(60)) { item ->
+                                items(workingMedia, key = { it.id }) { item ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -615,7 +615,7 @@ private fun CollageDialog(
                 Text("Select up to 4 photos from your gallery to create a collage:")
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(modifier = Modifier.height(220.dp)) {
-                    items(mediaList.take(24)) { item ->
+                    items(mediaList, key = { it.id }) { item ->
                         val isSel = selectedUris.contains(item.uri)
                         Row(
                             modifier = Modifier
@@ -675,7 +675,7 @@ private fun CompressorDialog(
                 Text("Select image to compress:")
                 Spacer(modifier = Modifier.height(6.dp))
                 LazyColumn(modifier = Modifier.height(140.dp)) {
-                    items(mediaList.take(15)) { item ->
+                    items(mediaList, key = { it.id }) { item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -723,15 +723,67 @@ private fun ContactSheetDialog(
     onDismiss: () -> Unit,
     onGenerate: (List<MediaItem>, Int) -> Unit
 ) {
+    // A single contact-sheet image can only legibly fit this many thumbnails;
+    // this is a rendering limit of SultanContactSheet, not an artificial cap
+    // on which photos the user is allowed to choose from.
+    val maxPerSheet = 36
+    var selectedIds by remember(mediaList) {
+        mutableStateOf(mediaList.take(maxPerSheet).map { it.id }.toSet())
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Contact Sheet Generator") },
         text = {
-            Text("Generate a master index contact sheet for the first ${mediaList.take(20).size} photos with file names, sizes, and timestamps formatted for printing.")
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Choose up to $maxPerSheet photos for one printable index sheet with file names, sizes, and timestamps:",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.height(220.dp)) {
+                    items(mediaList, key = { it.id }) { item ->
+                        val isSelected = selectedIds.contains(item.id)
+                        val canToggleOn = isSelected || selectedIds.size < maxPerSheet
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = canToggleOn) {
+                                    selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                if (isSelected) "☑ " else "☐ ",
+                                color = if (isSelected) SultanGold else if (canToggleOn) Color.Gray else Color.DarkGray,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                item.displayName,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (canToggleOn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Selected: ${selectedIds.size} / $maxPerSheet photos",
+                    fontWeight = FontWeight.Bold,
+                    color = SultanGold,
+                    fontSize = 12.sp
+                )
+            }
         },
         confirmButton = {
             Button(
-                onClick = { onGenerate(mediaList.take(20), 4) },
+                onClick = {
+                    val selected = mediaList.filter { selectedIds.contains(it.id) }
+                    if (selected.isNotEmpty()) onGenerate(selected, 4)
+                },
+                enabled = selectedIds.isNotEmpty(),
                 colors = ButtonDefaults.buttonColors(containerColor = SultanGold)
             ) {
                 Text("Generate Sheet", color = Color.Black, fontWeight = FontWeight.Bold)
@@ -908,7 +960,7 @@ private fun ConverterDialog(
                 Text("Select image to convert:")
                 Spacer(modifier = Modifier.height(6.dp))
                 LazyColumn(modifier = Modifier.height(130.dp)) {
-                    items(mediaList.take(15)) { item ->
+                    items(mediaList, key = { it.id }) { item ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable { selectedItem = item }.padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -963,7 +1015,7 @@ private fun ImagesToPdfDialog(
                 Text("Select photos to compile into a PDF:", style = MaterialTheme.typography.bodySmall)
                 Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn(modifier = Modifier.height(200.dp)) {
-                    items(mediaList.take(30)) { item ->
+                    items(mediaList, key = { it.id }) { item ->
                         val isSelected = selectedIds.contains(item.id)
                         Row(
                             modifier = Modifier
