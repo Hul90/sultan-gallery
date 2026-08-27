@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -133,6 +134,22 @@ fun VideoPlayerScreen(
         val original = activity?.requestedOrientation
         onDispose {
             if (original != null) activity.requestedOrientation = original
+        }
+    }
+
+    // The brightness swipe gesture below overrides this Activity window's
+    // screenBrightness directly. Since every screen in the app shares the
+    // same Activity, that override would otherwise keep applying to photos,
+    // albums, and every other screen until the app process is killed. Reset
+    // it back to the system-controlled default the moment this screen is left.
+    DisposableEffect(Unit) {
+        onDispose {
+            val window = activity?.window
+            if (window != null) {
+                val params = window.attributes
+                params.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                window.attributes = params
+            }
         }
     }
 
@@ -551,6 +568,7 @@ fun VideoPlayerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.75f))
+                    .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 // Progress Slider

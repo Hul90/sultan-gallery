@@ -1,3 +1,38 @@
+SULTAN GALLERY - BUILD FIX 5
+
+Fixed two runtime UX bugs reported after installing the APK:
+
+1. Bottom action bar overlapping the system navigation bar in Photo
+   Viewer and Video Player.
+   - Both screens turn on ImmersiveMode(enabled = true), which draws
+     content edge-to-edge (setDecorFitsSystemWindows(window, false)) so
+     the transient nav bar can be swiped in over the content. Their
+     bottom control bars were not padded for that inset, so the
+     buttons sat right underneath the (swiped-in) navigation bar.
+   - Fix: added .navigationBarsPadding() to the bottom action Row in
+     PhotoViewerScreen.kt and to the bottom controls Column in
+     VideoPlayerScreen.kt, so the buttons always stay a nav-bar's
+     height above the bottom edge.
+
+2. Screen brightness raised while swiping on a video stayed raised
+   on every other screen (photos, albums, etc.) until the whole app
+   was closed.
+   - VideoPlayerScreen's left-half vertical swipe gesture sets
+     brightness directly via `activity.window.attributes.screenBrightness`.
+     Since the whole app runs in a single Activity (Compose Navigation),
+     that override applied to the Activity window itself and was never
+     being reset when leaving the video player, so it kept affecting
+     every other screen for the rest of the session.
+   - Fix: added a DisposableEffect in VideoPlayerScreen that restores
+     `screenBrightness` to `WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE`
+     (system default) the moment the video player screen is left, so the
+     brightness change is scoped only to while a video is open.
+
+No intentional feature removals. Existing Sultan Tools, Quick Panel,
+format filter, cached startup and selection workflow are retained.
+
+-------------------------------------------------------------------
+
 SULTAN GALLERY - BUILD FIX 4
 
 Fixed the GitHub Actions compile error from the previous build:
