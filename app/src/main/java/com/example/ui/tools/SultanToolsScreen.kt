@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.MediaThumbnail
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.CropPreset
+import com.example.data.model.MediaAlbum
 import com.example.data.model.MediaItem
 import com.example.tools.SultanContactSheet
 import com.example.tools.SultanDuplicateFinder
@@ -407,6 +408,10 @@ fun SultanToolsScreen(
         }
 
         var analyzerSelectedItem by remember { mutableStateOf<MediaItem?>(null) }
+        var analyzerFolderId by remember { mutableStateOf<String?>(null) }
+        val analyzerFolderMedia = remember(state.allMedia, analyzerFolderId) {
+            mediaInFolder(state.allMedia, analyzerFolderId)
+        }
 
         // Active Tool Dialogs
         when (activeToolDialog) {
@@ -416,26 +421,28 @@ fun SultanToolsScreen(
                     title = { Text("Select Media to Inspect") },
                     text = {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            Text("Choose any media item from your gallery:", style = MaterialTheme.typography.bodySmall)
+                            Text("Pick a folder, then tap the item to inspect:", style = MaterialTheme.typography.bodySmall)
                             Spacer(modifier = Modifier.height(8.dp))
-                            LazyColumn(modifier = Modifier.height(260.dp)) {
-                                items(workingMedia, key = { it.id }) { item ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                analyzerSelectedItem = item
-                                                activeToolDialog = null
-                                            }
-                                            .padding(vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("🔍 ", fontSize = 14.sp)
-                                        Column {
-                                            Text(item.displayName, maxLines = 1, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                                            Text("${item.mimeType} • ${item.formattedSize}", style = MaterialTheme.typography.labelSmall, color = SultanGold)
+                            ToolFolderChips(albums = state.albums, selectedFolderId = analyzerFolderId, onSelect = { analyzerFolderId = it })
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(4),
+                                modifier = Modifier.fillMaxWidth().height(260.dp)
+                            ) {
+                                gridItems(analyzerFolderMedia, key = { it.id }) { item ->
+                                    MediaThumbnail(
+                                        item = item,
+                                        isSelected = analyzerSelectedItem?.id == item.id,
+                                        isSelectionMode = false,
+                                        onClick = {
+                                            analyzerSelectedItem = item
+                                            activeToolDialog = null
+                                        },
+                                        onLongClick = {
+                                            analyzerSelectedItem = item
+                                            activeToolDialog = null
                                         }
-                                    }
+                                    )
                                 }
                             }
                         }
@@ -449,7 +456,8 @@ fun SultanToolsScreen(
             }
             "IMAGES_TO_PDF" -> {
                 ImagesToPdfDialog(
-                    mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
+                    allMedia = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                    albums = state.albums,
                     onDismiss = { activeToolDialog = null },
                     onGeneratePdf = { selectedItems ->
                         scope.launch {
@@ -471,7 +479,8 @@ fun SultanToolsScreen(
                 )
             }
             "COLLAGE" -> CollageDialog(
-                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
+                allMedia = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                albums = state.albums,
                 onDismiss = { activeToolDialog = null },
                 onCollageCreated = { bmp ->
                     scope.launch {
@@ -483,7 +492,8 @@ fun SultanToolsScreen(
                 }
             )
             "COMPRESS" -> CompressorDialog(
-                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
+                allMedia = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                albums = state.albums,
                 onDismiss = { activeToolDialog = null },
                 onCompress = { item, level ->
                     scope.launch {
@@ -528,7 +538,8 @@ fun SultanToolsScreen(
                 onDismiss = { activeToolDialog = null }
             )
             "CONVERTER" -> ConverterDialog(
-                mediaList = workingMedia.filter { !it.isVideo && !it.isAudio },
+                allMedia = state.allMedia.filter { !it.isVideo && !it.isAudio },
+                albums = state.albums,
                 onDismiss = { activeToolDialog = null },
                 onConvert = { item, fmt ->
                     scope.launch {
@@ -597,39 +608,81 @@ private fun ToolItemCard(
 }
 
 @Composable
+private fun ToolFolderChips(
+    albums: List<MediaAlbum>,
+    selectedFolderId: String?,
+    onSelect: (String?) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        FilterChip(
+            selected = selectedFolderId == null,
+            onClick = { onSelect(null) },
+            label = { Text("All Folders", fontSize = 11.sp) },
+            leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(14.dp)) },
+            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SultanGold.copy(alpha = 0.2f), selectedLabelColor = SultanGold)
+        )
+        albums.forEach { album ->
+            FilterChip(
+                selected = selectedFolderId == album.id,
+                onClick = { onSelect(album.id) },
+                label = { Text(album.name, maxLines = 1, fontSize = 11.sp) },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = SultanGold.copy(alpha = 0.2f), selectedLabelColor = SultanGold)
+            )
+        }
+    }
+}
+
+private fun mediaInFolder(allMedia: List<MediaItem>, folderId: String?): List<MediaItem> =
+    if (folderId == null) allMedia
+    else allMedia.filter { it.bucketId == folderId || it.bucketName.equals(folderId, ignoreCase = true) }
+
+@Composable
 private fun CollageDialog(
-    mediaList: List<MediaItem>,
+    allMedia: List<MediaItem>,
+    albums: List<MediaAlbum>,
     onDismiss: () -> Unit,
     onCollageCreated: (Bitmap) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var folderId by remember { mutableStateOf<String?>(null) }
     var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var isBuilding by remember { mutableStateOf(false) }
+    val folderMedia = remember(allMedia, folderId) { mediaInFolder(allMedia, folderId) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Sultan Photo Collage") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Select up to 4 photos from your gallery to create a collage:")
+                Text("Pick a folder, then tap up to 4 photos:", style = MaterialTheme.typography.bodySmall)
                 Spacer(modifier = Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.height(220.dp)) {
-                    items(mediaList, key = { it.id }) { item ->
+                ToolFolderChips(albums = albums, selectedFolderId = folderId, onSelect = { folderId = it })
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxWidth().height(240.dp)
+                ) {
+                    gridItems(folderMedia, key = { it.id }) { item ->
                         val isSel = selectedUris.contains(item.uri)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (isSel) selectedUris = selectedUris - item.uri
-                                    else if (selectedUris.size < 4) selectedUris = selectedUris + item.uri
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (isSel) "☑ " else "☐ ", fontSize = 18.sp, color = SultanGold)
-                            Text(item.displayName, maxLines = 1, style = MaterialTheme.typography.bodyMedium)
-                        }
+                        MediaThumbnail(
+                            item = item,
+                            isSelected = isSel,
+                            isSelectionMode = selectedUris.isNotEmpty(),
+                            onClick = {
+                                selectedUris = if (isSel) selectedUris - item.uri
+                                else if (selectedUris.size < 4) selectedUris + item.uri
+                                else selectedUris
+                            },
+                            onLongClick = {
+                                selectedUris = if (isSel) selectedUris - item.uri
+                                else if (selectedUris.size < 4) selectedUris + item.uri
+                                else selectedUris
+                            }
+                        )
                     }
                 }
             }
@@ -660,11 +713,14 @@ private fun CollageDialog(
 
 @Composable
 private fun CompressorDialog(
-    mediaList: List<MediaItem>,
+    allMedia: List<MediaItem>,
+    albums: List<MediaAlbum>,
     onDismiss: () -> Unit,
     onCompress: (MediaItem, SultanImageCompressor.CompressionLevel) -> Unit
 ) {
-    var selectedItem by remember { mutableStateOf(mediaList.firstOrNull()) }
+    var folderId by remember { mutableStateOf<String?>(null) }
+    val folderMedia = remember(allMedia, folderId) { mediaInFolder(allMedia, folderId) }
+    var selectedItem by remember { mutableStateOf<MediaItem?>(null) }
     var level by remember { mutableStateOf(SultanImageCompressor.CompressionLevel.HIGH) }
 
     AlertDialog(
@@ -672,21 +728,27 @@ private fun CompressorDialog(
         title = { Text("Sultan Image Compressor") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Select image to compress:")
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyColumn(modifier = Modifier.height(140.dp)) {
-                    items(mediaList, key = { it.id }) { item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedItem = item }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (selectedItem?.id == item.id) "● " else "○ ", color = SultanGold)
-                            Text("${item.displayName} (${item.formattedSize})", maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                        }
+                Text("Pick a folder, then tap the image to compress:", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                ToolFolderChips(albums = albums, selectedFolderId = folderId, onSelect = { folderId = it })
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                ) {
+                    gridItems(folderMedia, key = { it.id }) { item ->
+                        MediaThumbnail(
+                            item = item,
+                            isSelected = selectedItem?.id == item.id,
+                            isSelectionMode = selectedItem != null,
+                            onClick = { selectedItem = item },
+                            onLongClick = { selectedItem = item }
+                        )
                     }
+                }
+                selectedItem?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("${it.displayName} (${it.formattedSize})", maxLines = 1, style = MaterialTheme.typography.bodySmall, color = SultanGold)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Compression preset:")
@@ -945,11 +1007,14 @@ private fun OrganizerDialog(
 
 @Composable
 private fun ConverterDialog(
-    mediaList: List<MediaItem>,
+    allMedia: List<MediaItem>,
+    albums: List<MediaAlbum>,
     onDismiss: () -> Unit,
     onConvert: (MediaItem, SultanFormatConverter.TargetFormat) -> Unit
 ) {
-    var selectedItem by remember { mutableStateOf(mediaList.firstOrNull()) }
+    var folderId by remember { mutableStateOf<String?>(null) }
+    val folderMedia = remember(allMedia, folderId) { mediaInFolder(allMedia, folderId) }
+    var selectedItem by remember { mutableStateOf<MediaItem?>(null) }
     var targetFormat by remember { mutableStateOf(SultanFormatConverter.TargetFormat.WEBP) }
 
     AlertDialog(
@@ -957,18 +1022,27 @@ private fun ConverterDialog(
         title = { Text("Sultan Format Converter") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Select image to convert:")
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyColumn(modifier = Modifier.height(130.dp)) {
-                    items(mediaList, key = { it.id }) { item ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { selectedItem = item }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (selectedItem?.id == item.id) "● " else "○ ", color = SultanGold)
-                            Text(item.displayName, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                        }
+                Text("Pick a folder, then tap the image to convert:", style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                ToolFolderChips(albums = albums, selectedFolderId = folderId, onSelect = { folderId = it })
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                ) {
+                    gridItems(folderMedia, key = { it.id }) { item ->
+                        MediaThumbnail(
+                            item = item,
+                            isSelected = selectedItem?.id == item.id,
+                            isSelectionMode = selectedItem != null,
+                            onClick = { selectedItem = item },
+                            onLongClick = { selectedItem = item }
+                        )
                     }
+                }
+                selectedItem?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(it.displayName, maxLines = 1, style = MaterialTheme.typography.bodySmall, color = SultanGold)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Convert to format:")
@@ -1001,10 +1075,13 @@ private fun ConverterDialog(
 
 @Composable
 private fun ImagesToPdfDialog(
-    mediaList: List<MediaItem>,
+    allMedia: List<MediaItem>,
+    albums: List<MediaAlbum>,
     onDismiss: () -> Unit,
     onGeneratePdf: (List<MediaItem>) -> Unit
 ) {
+    var folderId by remember { mutableStateOf<String?>(null) }
+    val folderMedia = remember(allMedia, folderId) { mediaInFolder(allMedia, folderId) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
 
     AlertDialog(
@@ -1012,23 +1089,27 @@ private fun ImagesToPdfDialog(
         title = { Text("Images to PDF Document") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text("Select photos to compile into a PDF:", style = MaterialTheme.typography.bodySmall)
+                Text("Pick a folder, then tap photos to add to the PDF:", style = MaterialTheme.typography.bodySmall)
                 Spacer(modifier = Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.height(200.dp)) {
-                    items(mediaList, key = { it.id }) { item ->
+                ToolFolderChips(albums = albums, selectedFolderId = folderId, onSelect = { folderId = it })
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxWidth().height(220.dp)
+                ) {
+                    gridItems(folderMedia, key = { it.id }) { item ->
                         val isSelected = selectedIds.contains(item.id)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
-                                }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (isSelected) "☑ " else "☐ ", color = if (isSelected) SultanGold else Color.Gray, fontSize = 16.sp)
-                            Text(item.displayName, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                        }
+                        MediaThumbnail(
+                            item = item,
+                            isSelected = isSelected,
+                            isSelectionMode = selectedIds.isNotEmpty(),
+                            onClick = {
+                                selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                            },
+                            onLongClick = {
+                                selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                            }
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1038,7 +1119,7 @@ private fun ImagesToPdfDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val selected = mediaList.filter { selectedIds.contains(it.id) }
+                    val selected = allMedia.filter { selectedIds.contains(it.id) }
                     onGeneratePdf(selected)
                 },
                 enabled = selectedIds.isNotEmpty(),

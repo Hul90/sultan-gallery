@@ -1,3 +1,33 @@
+SULTAN GALLERY - BUILD FIX 7
+
+Feature request: inside Sultan Photo Collage, Sultan Image Compressor,
+Sultan Format Converter, Images to PDF Document, and Sultan Format
+Analyzer, let the user pick any album/folder and see photo thumbnails
+to choose from, instead of hunting through a plain list of file names.
+
+What changed in each of those 5 tool dialogs:
+  - Added the same folder filter chips used in the Working Folder card
+    ("All Folders" + every album), so you can switch straight to any
+    album while the tool is open.
+  - Replaced the plain text file-name list with a scrollable photo
+    thumbnail grid (the same MediaThumbnail component used everywhere
+    else in the app), with a gold selection border so you can see
+    exactly which photo(s) you're about to work with.
+  - These dialogs now browse your entire library (via every album),
+    not just the folder that was active on the main Sultan Tools
+    screen, so you never have to leave the tool to change folders.
+
+Sultan Duplicate Finder, Sultan Large File Cleaner, Sultan Media
+Organizer & Stats, and Sultan Contact Sheet Generator work on a
+different model (bulk scan across everything or a curated pick list)
+and were left as-is since folder-by-folder browsing doesn't apply to
+them the same way.
+
+No intentional feature removals. Existing Sultan Tools, Quick Panel,
+format filter, cached startup and selection workflow are retained.
+
+-------------------------------------------------------------------
+
 SULTAN GALLERY - BUILD FIX 6
 
 Fixed: Sultan Tools sub-tools (Collage, Compressor, Format Converter,
