@@ -29,8 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.SkipNext
-import androidx.compose.material.icons.automirrored.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
@@ -77,7 +77,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.util.calculateZoom
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -480,7 +480,7 @@ fun VideoPlayerScreen(
                     modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.SkipPrevious,
+                        Icons.Filled.SkipPrevious,
                         contentDescription = "Previous Video",
                         tint = if (currentIndex > 0) Color.White else Color.Gray,
                         modifier = Modifier.size(30.dp)
@@ -525,7 +525,7 @@ fun VideoPlayerScreen(
                     modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.SkipNext,
+                        Icons.Filled.SkipNext,
                         contentDescription = "Next Video",
                         tint = if (currentIndex < videoList.lastIndex) Color.White else Color.Gray,
                         modifier = Modifier.size(30.dp)
