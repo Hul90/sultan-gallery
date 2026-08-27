@@ -4,6 +4,7 @@ import android.app.WallpaperManager
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
+import android.media.MediaScannerConnection
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -755,7 +756,7 @@ class MediaStoreRepository(
                 if (!targetDir.exists()) targetDir.mkdirs()
                 val target = File(targetDir, item.displayName)
                 if (!sourceFile.renameTo(target)) return@withContext false
-                context.contentResolver.scanFile(target.absolutePath, item.mimeType, null)
+                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(item.mimeType), null)
                 context.contentResolver.delete(item.uri, null, null)
                 true
             }

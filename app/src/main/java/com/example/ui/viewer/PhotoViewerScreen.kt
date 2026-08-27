@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.FolderCopy
-import androidx.compose.material.icons.filled.FolderMove
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.CircularProgressIndicator
@@ -288,7 +287,7 @@ fun PhotoViewerScreen(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Move to album") },
-                            leadingIcon = { Icon(Icons.Default.FolderMove, contentDescription = null) },
+                            leadingIcon = { Icon(Icons.Default.FolderCopy, contentDescription = null) },
                             onClick = { showMoreMenu = false; albumDialogCopy = false; showAlbumDialog = true }
                         )
                         DropdownMenuItem(
