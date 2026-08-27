@@ -726,6 +726,106 @@ class MediaStoreRepository(
         null
     }
 
+    suspend fun renameMedia(item: MediaItem, newBaseName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val extension = item.displayName.substringAfterLast('.', "")
+            val safeBase = newBaseName.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            if (safeBase.isBlank()) return@withContext false
+            val newName = if (extension.isBlank()) safeBase else "$safeBase.$extension"
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, newName) }
+            context.contentResolver.update(item.uri, values, null, null) > 0
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun moveToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val cleanAlbum = albumName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").trim('.')
+            if (cleanAlbum.isBlank()) return@withContext false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val base = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$base/$cleanAlbum")
+                }
+                context.contentResolver.update(item.uri, values, null, null) > 0
+            } else {
+                val source = item.path
+                if (source.isBlank()) return@withContext false
+                val sourceFile = File(source)
+                val targetDir = File(Environment.getExternalStoragePublicDirectory(if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES), cleanAlbum)
+                if (!targetDir.exists()) targetDir.mkdirs()
+                val target = File(targetDir, item.displayName)
+                if (!sourceFile.renameTo(target)) return@withContext false
+                context.contentResolver.scanFile(target.absolutePath, item.mimeType, null)
+                context.contentResolver.delete(item.uri, null, null)
+                true
+            }
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun copyToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val cleanAlbum = albumName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").trim('.')
+            if (cleanAlbum.isBlank()) return@withContext false
+            val base = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+            val collection = if (item.isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType.ifBlank { if (item.isVideo) "video/mp4" else "image/jpeg" })
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$base/$cleanAlbum")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            val newUri = context.contentResolver.insert(collection, values) ?: return@withContext false
+            try {
+                context.contentResolver.openInputStream(item.uri)?.use { input ->
+                    context.contentResolver.openOutputStream(newUri)?.use { output -> input.copyTo(output) }
+                        ?: throw IllegalStateException("Unable to open destination")
+                } ?: throw IllegalStateException("Unable to open source")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    context.contentResolver.update(newUri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                }
+                true
+            } catch (_: Exception) {
+                try { context.contentResolver.delete(newUri, null, null) } catch (_: Exception) {}
+                false
+            }
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun convertImageToPdf(item: MediaItem): Uri? = withContext(Dispatchers.IO) {
+        try {
+            val pdfFile = File(context.cacheDir, "Sultan_${System.currentTimeMillis()}.pdf")
+            val ok = com.example.tools.SultanDecoderEngine.convertImagesToPdf(context, listOf(item), pdfFile)
+            if (!ok || !pdfFile.exists() || pdfFile.length() == 0L) return@withContext null
+
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName.substringBeforeLast('.') + ".pdf")
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                put(MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOCUMENTS}/Sultan Gallery")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+            }
+            val pdfUri = context.contentResolver.insert(MediaStore.Files.getContentUri("external"), values)
+                ?: return@withContext null
+            try {
+                pdfFile.inputStream().use { input ->
+                    context.contentResolver.openOutputStream(pdfUri)?.use { output -> input.copyTo(output) }
+                        ?: throw IllegalStateException("Unable to open PDF destination")
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    context.contentResolver.update(pdfUri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                }
+                pdfUri
+            } catch (_: Exception) {
+                try { context.contentResolver.delete(pdfUri, null, null) } catch (_: Exception) {}
+                null
+            } finally { pdfFile.delete() }
+        } catch (_: Exception) { null }
+    }
+
     suspend fun setAsWallpaper(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         try {
             context.contentResolver.openInputStream(uri)?.use { stream ->

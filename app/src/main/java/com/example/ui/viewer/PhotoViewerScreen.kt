@@ -25,16 +25,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.filled.FolderCopy
+import androidx.compose.material.icons.filled.FolderMove
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -120,6 +128,12 @@ fun PhotoViewerScreen(
     val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
     var showControls by remember { mutableStateOf(true) }
     var showDetailsDialog by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showAlbumDialog by remember { mutableStateOf(false) }
+    var albumDialogCopy by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
+    var showPdfConfirm by remember { mutableStateOf(false) }
     var isCurrentPageZoomed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -239,24 +253,14 @@ fun PhotoViewerScreen(
                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = SultanGold)
                 }
 
-                // Favorite
+                // Unique action: Set as Wallpaper
                 IconButton(onClick = {
-                    viewModel.toggleFavorite(currentPhoto)
+                    scope.launch {
+                        val ok = viewModel.repository.setAsWallpaper(currentPhoto.uri)
+                        viewModel.showMessage(if (ok) "Wallpaper updated" else "Could not set wallpaper")
+                    }
                 }) {
-                    Icon(
-                        imageVector = if (currentPhoto.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (currentPhoto.isFavorite) SultanGold else Color.White
-                    )
-                }
-
-                // Move to Vault
-                IconButton(onClick = {
-                    viewModel.toggleSelection(currentPhoto.id)
-                    viewModel.batchVaultSelected()
-                    leaveViewer()
-                }) {
-                    Icon(Icons.Default.Lock, contentDescription = "Move to Vault", tint = Color.White)
+                    Icon(Icons.Default.AutoAwesome, contentDescription = "Set Wallpaper", tint = SultanGold)
                 }
 
                 // Delete to Trash
@@ -272,7 +276,121 @@ fun PhotoViewerScreen(
                 }) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                 }
+
+                // More actions
+                Box {
+                    IconButton(onClick = { showMoreMenu = true }) {
+                        Text("⋮", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    }
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Move to album") },
+                            leadingIcon = { Icon(Icons.Default.FolderMove, contentDescription = null) },
+                            onClick = { showMoreMenu = false; albumDialogCopy = false; showAlbumDialog = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Copy to album") },
+                            leadingIcon = { Icon(Icons.Default.FolderCopy, contentDescription = null) },
+                            onClick = { showMoreMenu = false; albumDialogCopy = true; showAlbumDialog = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                renameText = currentPhoto.displayName.substringBeforeLast('.')
+                                showRenameDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Convert to PDF") },
+                            leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null) },
+                            onClick = { showMoreMenu = false; showPdfConfirm = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Details") },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                            onClick = { showMoreMenu = false; showDetailsDialog = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Set as Wallpaper") },
+                            leadingIcon = { Icon(Icons.Default.Wallpaper, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                scope.launch {
+                                    val ok = viewModel.repository.setAsWallpaper(currentPhoto.uri)
+                                    viewModel.showMessage(if (ok) "Wallpaper updated" else "Could not set wallpaper")
+                                }
+                            }
+                        )
+                    }
+                }
             }
+        }
+
+        if (showRenameDialog) {
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("Rename") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        label = { Text("File name") }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val base = renameText.trim()
+                        if (base.isNotEmpty()) {
+                            showRenameDialog = false
+                            scope.launch {
+                                val ok = viewModel.repository.renameMedia(currentPhoto, base)
+                                viewModel.showMessage(if (ok) "Renamed successfully" else "Rename failed")
+                                viewModel.refreshMedia()
+                            }
+                        }
+                    }) { Text("Rename") }
+                },
+                dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } }
+            )
+        }
+
+        if (showAlbumDialog) {
+            AlbumNameDialog(
+                title = if (albumDialogCopy) "Copy to album" else "Move to album",
+                onDismiss = { showAlbumDialog = false },
+                onConfirm = { albumName ->
+                    showAlbumDialog = false
+                    scope.launch {
+                        val ok = if (albumDialogCopy) viewModel.repository.copyToAlbum(currentPhoto, albumName) else viewModel.repository.moveToAlbum(currentPhoto, albumName)
+                        viewModel.showMessage(if (ok) (if (albumDialogCopy) "Copied to $albumName" else "Moved to $albumName") else "Album operation failed")
+                        viewModel.refreshMedia()
+                    }
+                }
+            )
+        }
+
+        if (showPdfConfirm) {
+            AlertDialog(
+                onDismissRequest = { showPdfConfirm = false },
+                title = { Text("Convert to PDF") },
+                text = { Text("Create a PDF from this picture and save it to Sultan Gallery?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showPdfConfirm = false
+                        scope.launch {
+                            val result = viewModel.repository.convertImageToPdf(currentPhoto)
+                            viewModel.showMessage(if (result != null) "PDF saved" else "PDF conversion failed")
+                        }
+                    }) { Text("Convert") }
+                },
+                dismissButton = { TextButton(onClick = { showPdfConfirm = false }) { Text("Cancel") } }
+            )
         }
 
         if (showDetailsDialog) {
@@ -288,6 +406,32 @@ fun PhotoViewerScreen(
             )
         }
     }
+}
+
+@Composable
+private fun AlbumNameDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Album name") },
+                placeholder = { Text("e.g. Vacation") }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { if (name.trim().isNotEmpty()) onConfirm(name.trim()) }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
