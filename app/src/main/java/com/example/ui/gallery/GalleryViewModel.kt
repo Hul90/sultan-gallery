@@ -2,6 +2,7 @@ package com.example.ui.gallery
 
 import android.app.Application
 import android.content.Context
+import android.content.IntentSender
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -266,17 +267,42 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun permanentlyDeleteTrashItem(trashEntity: TrashEntity) {
+    fun permanentlyDeleteTrashItem(
+        trashEntity: TrashEntity,
+        onDeleteRequest: (IntentSender, List<String>) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
-            repository.permanentlyDeleteTrash(trashEntity)
-            showMessage("Permanently deleted")
+            val result = repository.permanentlyDeleteTrash(trashEntity)
+            if (result.intentSender != null) {
+                onDeleteRequest(result.intentSender, result.pendingUriStrings)
+            } else if (result.deleted) {
+                showMessage("Permanently deleted")
+            } else {
+                showMessage("Could not permanently delete this item")
+            }
         }
     }
 
-    fun emptyTrash() {
+    fun emptyTrash(
+        onDeleteRequest: (IntentSender, List<String>) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
-            repository.emptyTrash()
-            showMessage("Trash cleared")
+            val result = repository.emptyTrash()
+            if (result.intentSender != null) {
+                onDeleteRequest(result.intentSender, result.pendingUriStrings)
+            } else if (result.deleted) {
+                showMessage("Trash cleared")
+            } else {
+                showMessage("Some items could not be permanently deleted")
+            }
+        }
+    }
+
+    fun finalizePendingTrashDeletion(uriStrings: List<String>) {
+        if (uriStrings.isEmpty()) return
+        viewModelScope.launch {
+            repository.finalizeTrashDeletion(uriStrings)
+            showMessage("Permanently deleted")
         }
     }
 

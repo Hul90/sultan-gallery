@@ -452,7 +452,16 @@ class MediaStoreRepository(
         }
     }
 
+    data class TrashDeleteResult(
+        val deleted: Boolean,
+        val intentSender: android.content.IntentSender? = null,
+        val pendingUriStrings: List<String> = emptyList()
+    )
+
     suspend fun moveToTrash(item: MediaItem) = withContext(Dispatchers.IO) {
+        // Keep the MediaStore item intact while it is in our recycle bin. The
+        // Room record hides it from this app's gallery until it is restored or
+        // permanently deleted. This also makes Restore reliable.
         dao.insertTrash(
             TrashEntity(
                 uriString = item.uri.toString(),
@@ -466,21 +475,104 @@ class MediaStoreRepository(
     }
 
     suspend fun restoreFromTrash(trashEntity: TrashEntity) = withContext(Dispatchers.IO) {
+        // Nothing is removed from MediaStore until permanent deletion, so
+        // restoring is simply removing the app's hidden-trash marker.
         dao.deleteTrashItem(trashEntity.uriString)
     }
 
-    suspend fun permanentlyDeleteTrash(trashEntity: TrashEntity) = withContext(Dispatchers.IO) {
-        dao.deleteTrashItem(trashEntity.uriString)
+    suspend fun permanentlyDeleteTrash(trashEntity: TrashEntity): TrashDeleteResult = withContext(Dispatchers.IO) {
+        val uri = Uri.parse(trashEntity.uriString)
         try {
-            val uri = Uri.parse(trashEntity.uriString)
-            context.contentResolver.delete(uri, null, null)
+            val deletedRows = context.contentResolver.delete(uri, null, null)
+            if (deletedRows > 0) {
+                dao.deleteTrashItem(trashEntity.uriString)
+                TrashDeleteResult(deleted = true)
+            } else {
+                // The media may already have been removed outside the app. Do
+                // not keep a stale Room record that can make the item reappear.
+                dao.deleteTrashItem(trashEntity.uriString)
+                TrashDeleteResult(deleted = true)
+            }
+        } catch (e: android.app.RecoverableSecurityException) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val sender = MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    listOf(uri)
+                ).intentSender
+                TrashDeleteResult(
+                    deleted = false,
+                    intentSender = sender,
+                    pendingUriStrings = listOf(trashEntity.uriString)
+                )
+            } else {
+                TrashDeleteResult(deleted = false)
+            }
+        } catch (_: SecurityException) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val sender = MediaStore.createDeleteRequest(
+                        context.contentResolver,
+                        listOf(uri)
+                    ).intentSender
+                    TrashDeleteResult(
+                        deleted = false,
+                        intentSender = sender,
+                        pendingUriStrings = listOf(trashEntity.uriString)
+                    )
+                } catch (_: Exception) {
+                    TrashDeleteResult(deleted = false)
+                }
+            } else {
+                TrashDeleteResult(deleted = false)
+            }
         } catch (_: Exception) {
-            // Scoped storage security exception fallback
+            TrashDeleteResult(deleted = false)
         }
     }
 
-    suspend fun emptyTrash() = withContext(Dispatchers.IO) {
-        dao.clearTrash()
+    suspend fun emptyTrash(): TrashDeleteResult = withContext(Dispatchers.IO) {
+        val trashItems = dao.getAllTrash().firstOrNull().orEmpty()
+        if (trashItems.isEmpty()) return@withContext TrashDeleteResult(deleted = true)
+
+        val pending = mutableListOf<TrashEntity>()
+        trashItems.forEach { item ->
+            val uri = Uri.parse(item.uriString)
+            try {
+                val deletedRows = context.contentResolver.delete(uri, null, null)
+                // A zero-row result means the MediaStore item is already gone.
+                if (deletedRows >= 0) dao.deleteTrashItem(item.uriString)
+            } catch (_: android.app.RecoverableSecurityException) {
+                pending += item
+            } catch (_: SecurityException) {
+                pending += item
+            } catch (_: Exception) {
+                // Keep failed items in Trash rather than losing the record.
+            }
+        }
+
+        if (pending.isEmpty()) {
+            TrashDeleteResult(deleted = true)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val sender = MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    pending.map { Uri.parse(it.uriString) }
+                ).intentSender
+                TrashDeleteResult(
+                    deleted = false,
+                    intentSender = sender,
+                    pendingUriStrings = pending.map { it.uriString }
+                )
+            } catch (_: Exception) {
+                TrashDeleteResult(deleted = false)
+            }
+        } else {
+            TrashDeleteResult(deleted = false)
+        }
+    }
+
+    suspend fun finalizeTrashDeletion(uriStrings: List<String>) = withContext(Dispatchers.IO) {
+        uriStrings.forEach { dao.deleteTrashItem(it) }
     }
 
     suspend fun moveToVault(item: MediaItem): Boolean = withContext(Dispatchers.IO) {

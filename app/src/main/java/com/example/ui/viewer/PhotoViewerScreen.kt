@@ -1,6 +1,7 @@
 package com.example.ui.viewer
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -99,6 +101,21 @@ fun PhotoViewerScreen(
 
     ImmersiveMode(enabled = true)
 
+    // Guard navigation so a fast tap on the toolbar/back gesture cannot issue
+    // multiple popBackStack calls while the viewer is being disposed.
+    var isLeavingViewer by remember { mutableStateOf(false) }
+    val leaveViewer = {
+        if (!isLeavingViewer) {
+            isLeavingViewer = true
+            onNavigateBack()
+        }
+    }
+    BackHandler(enabled = !isLeavingViewer) { leaveViewer() }
+
+    DisposableEffect(Unit) {
+        onDispose { isLeavingViewer = true }
+    }
+
     val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { photos.size })
     val currentPhoto = photos.getOrNull(pagerState.currentPage) ?: photos.first()
     var showControls by remember { mutableStateOf(true) }
@@ -120,7 +137,9 @@ fun PhotoViewerScreen(
             val photo = photos[page]
             ZoomablePhotoItem(
                 photo = photo,
-                onTap = { showControls = !showControls },
+                // Viewer actions stay visible just like a dedicated gallery
+                // viewer: tapping the image never hides the action bars.
+                onTap = { showControls = true },
                 onZoomChanged = { zoomed ->
                     if (page == pagerState.currentPage) isCurrentPageZoomed = zoomed
                 }
@@ -152,7 +171,7 @@ fun PhotoViewerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = leaveViewer) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
@@ -235,17 +254,20 @@ fun PhotoViewerScreen(
                 IconButton(onClick = {
                     viewModel.toggleSelection(currentPhoto.id)
                     viewModel.batchVaultSelected()
-                    onNavigateBack()
+                    leaveViewer()
                 }) {
                     Icon(Icons.Default.Lock, contentDescription = "Move to Vault", tint = Color.White)
                 }
 
                 // Delete to Trash
                 IconButton(onClick = {
-                    scope.launch {
-                        viewModel.repository.moveToTrash(currentPhoto)
-                        viewModel.showMessage("Moved to Trash")
-                        onNavigateBack()
+                    if (!isLeavingViewer) {
+                        scope.launch {
+                            viewModel.repository.moveToTrash(currentPhoto)
+                            viewModel.refreshMedia()
+                            viewModel.showMessage("Moved to Trash")
+                            leaveViewer()
+                        }
                     }
                 }) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)

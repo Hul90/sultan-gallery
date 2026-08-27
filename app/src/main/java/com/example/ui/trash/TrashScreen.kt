@@ -36,6 +36,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +74,21 @@ fun TrashScreen(
 ) {
     val state by galleryViewModel.uiState.collectAsStateWithLifecycle()
     var showEmptyConfirmDialog by remember { mutableStateOf(false) }
+    var pendingDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val deleteRequestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            galleryViewModel.finalizePendingTrashDeletion(pendingDeleteUris)
+        }
+        pendingDeleteUris = emptyList()
+    }
+
+    fun launchDeleteRequest(sender: android.content.IntentSender, uris: List<String>) {
+        pendingDeleteUris = uris
+        deleteRequestLauncher.launch(IntentSenderRequest.Builder(sender).build())
+    }
 
     Scaffold(
         topBar = {
@@ -121,7 +140,11 @@ fun TrashScreen(
                         TrashMediaThumbnail(
                             trashEntity = trashItem,
                             onRestore = { galleryViewModel.restoreTrashItem(trashItem) },
-                            onDelete = { galleryViewModel.permanentlyDeleteTrashItem(trashItem) }
+                            onDelete = {
+                                galleryViewModel.permanentlyDeleteTrashItem(trashItem) { sender, uris ->
+                                    launchDeleteRequest(sender, uris)
+                                }
+                            }
                         )
                     }
                 }
@@ -136,7 +159,9 @@ fun TrashScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            galleryViewModel.emptyTrash()
+                            galleryViewModel.emptyTrash { sender, uris ->
+                                launchDeleteRequest(sender, uris)
+                            }
                             showEmptyConfirmDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
