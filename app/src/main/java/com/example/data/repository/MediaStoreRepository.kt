@@ -4,9 +4,9 @@ import android.app.WallpaperManager
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
-import android.media.MediaScannerConnection
 import android.content.Context
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -738,21 +738,31 @@ class MediaStoreRepository(
         } catch (_: Exception) { false }
     }
 
+    private fun normalizeAlbumPath(albumName: String, isVideo: Boolean): String {
+        val raw = albumName.trim().replace('\\', '/').trim('/')
+        if (raw.isBlank()) return ""
+        val safe = raw.split('/').filter { it.isNotBlank() }.joinToString("/") { part ->
+            part.replace(Regex("[:*?\"<>|]"), "_").trim('.')
+        }.trim('/')
+        if (safe.isBlank()) return ""
+        val root = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+        return if (safe.equals(root, true) || safe.startsWith("$root/", true) || safe.startsWith("DCIM/", true)) safe else "$root/$safe"
+    }
+
     suspend fun moveToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val cleanAlbum = albumName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").trim('.')
+            val cleanAlbum = normalizeAlbumPath(albumName, item.isVideo)
             if (cleanAlbum.isBlank()) return@withContext false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val base = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
                 val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$base/$cleanAlbum")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, cleanAlbum)
                 }
                 context.contentResolver.update(item.uri, values, null, null) > 0
             } else {
                 val source = item.path
                 if (source.isBlank()) return@withContext false
                 val sourceFile = File(source)
-                val targetDir = File(Environment.getExternalStoragePublicDirectory(if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES), cleanAlbum)
+                val targetDir = File(Environment.getExternalStorageDirectory(), cleanAlbum)
                 if (!targetDir.exists()) targetDir.mkdirs()
                 val target = File(targetDir, item.displayName)
                 if (!sourceFile.renameTo(target)) return@withContext false
@@ -765,15 +775,14 @@ class MediaStoreRepository(
 
     suspend fun copyToAlbum(item: MediaItem, albumName: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val cleanAlbum = albumName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_").trim('.')
+            val cleanAlbum = normalizeAlbumPath(albumName, item.isVideo)
             if (cleanAlbum.isBlank()) return@withContext false
-            val base = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
             val collection = if (item.isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName)
                 put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType.ifBlank { if (item.isVideo) "video/mp4" else "image/jpeg" })
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "$base/$cleanAlbum")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, cleanAlbum)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }
@@ -795,13 +804,34 @@ class MediaStoreRepository(
     }
 
     suspend fun convertImageToPdf(item: MediaItem): Uri? = withContext(Dispatchers.IO) {
+        var pdfUri: Uri? = null
+        val pdfFile = File(context.cacheDir, "Sultan_${System.currentTimeMillis()}.pdf")
         try {
-            val pdfFile = File(context.cacheDir, "Sultan_${System.currentTimeMillis()}.pdf")
-            val ok = com.example.tools.SultanDecoderEngine.convertImagesToPdf(context, listOf(item), pdfFile)
-            if (!ok || !pdfFile.exists() || pdfFile.length() == 0L) return@withContext null
+            val bitmap = context.contentResolver.openInputStream(item.uri)?.use { input ->
+                BitmapFactory.decodeStream(input)
+            } ?: return@withContext null
 
+            val document = android.graphics.pdf.PdfDocument()
+            try {
+                val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(
+                    bitmap.width.coerceAtLeast(1), bitmap.height.coerceAtLeast(1), 1
+                ).create()
+                val page = document.startPage(pageInfo)
+                page.canvas.drawBitmap(bitmap, 0f, 0f, android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    isFilterBitmap = true
+                })
+                document.finishPage(page)
+                FileOutputStream(pdfFile).use { document.writeTo(it) }
+            } finally {
+                document.close()
+                bitmap.recycle()
+            }
+
+            if (!pdfFile.exists() || pdfFile.length() == 0L) return@withContext null
+            val pdfName = item.displayName.substringBeforeLast('.', item.displayName) + ".pdf"
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, item.displayName.substringBeforeLast('.') + ".pdf")
+                put(MediaStore.MediaColumns.DISPLAY_NAME, pdfName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
                 put(MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -809,22 +839,45 @@ class MediaStoreRepository(
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }
-            val pdfUri = context.contentResolver.insert(MediaStore.Files.getContentUri("external"), values)
+            pdfUri = context.contentResolver.insert(MediaStore.Files.getContentUri("external"), values)
                 ?: return@withContext null
-            try {
-                pdfFile.inputStream().use { input ->
-                    context.contentResolver.openOutputStream(pdfUri)?.use { output -> input.copyTo(output) }
-                        ?: throw IllegalStateException("Unable to open PDF destination")
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    context.contentResolver.update(pdfUri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-                }
-                pdfUri
-            } catch (_: Exception) {
-                try { context.contentResolver.delete(pdfUri, null, null) } catch (_: Exception) {}
-                null
-            } finally { pdfFile.delete() }
-        } catch (_: Exception) { null }
+            context.contentResolver.openOutputStream(pdfUri!!)?.use { out ->
+                pdfFile.inputStream().use { input -> input.copyTo(out) }
+            } ?: throw IllegalStateException("Unable to write PDF")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.update(pdfUri!!, ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }, null, null)
+            }
+            pdfUri
+        } catch (_: Exception) {
+            pdfUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            null
+        } finally {
+            pdfFile.delete()
+        }
+    }
+
+    suspend fun rotateAndSave(item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val source = context.contentResolver.openInputStream(item.uri)?.use { BitmapFactory.decodeStream(it) }
+                ?: return@withContext false
+            val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+            val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+            if (rotated !== source) source.recycle()
+            val ok = context.contentResolver.openOutputStream(item.uri, "w")?.use { out ->
+                rotated.compress(
+                    when {
+                        item.mimeType.equals("image/png", true) -> Bitmap.CompressFormat.PNG
+                        item.mimeType.equals("image/webp", true) -> Bitmap.CompressFormat.WEBP_LOSSLESS
+                        else -> Bitmap.CompressFormat.JPEG
+                    }, 95, out
+                )
+            } ?: false
+            rotated.recycle()
+            ok
+        } catch (_: Exception) { false }
     }
 
     suspend fun setAsWallpaper(uri: Uri): Boolean = withContext(Dispatchers.IO) {
@@ -887,7 +940,12 @@ class MediaStoreRepository(
                 photoCount = photos,
                 videoCount = videos,
                 lastModified = latest,
-                relativePath = items.firstOrNull()?.path ?: ""
+                relativePath = items.firstOrNull()?.path?.let { fullPath ->
+                    val normalized = fullPath.replace('\\', '/')
+                    val marker = "/storage/emulated/0/"
+                    val rel = if (normalized.startsWith(marker)) normalized.removePrefix(marker) else normalized
+                    rel.substringBeforeLast('/', rel).trim('/')
+                } ?: ""
             )
         }.sortedByDescending { it.itemCount }
     }

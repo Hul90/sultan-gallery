@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -252,14 +255,15 @@ fun PhotoViewerScreen(
                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = SultanGold)
                 }
 
-                // Unique action: Set as Wallpaper
+                // Unique action: Rotate & Save
                 IconButton(onClick = {
                     scope.launch {
-                        val ok = viewModel.repository.setAsWallpaper(currentPhoto.uri)
-                        viewModel.showMessage(if (ok) "Wallpaper updated" else "Could not set wallpaper")
+                        val ok = viewModel.repository.rotateAndSave(currentPhoto)
+                        viewModel.showMessage(if (ok) "Rotated and saved" else "Could not rotate image")
+                        if (ok) viewModel.refreshMedia()
                     }
                 }) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = "Set Wallpaper", tint = SultanGold)
+                    Icon(Icons.Default.AutoAwesome, contentDescription = "Rotate and save", tint = SultanGold)
                 }
 
                 // Delete to Trash
@@ -360,14 +364,17 @@ fun PhotoViewerScreen(
         }
 
         if (showAlbumDialog) {
-            AlbumNameDialog(
+            AlbumPickerDialog(
                 title = if (albumDialogCopy) "Copy to album" else "Move to album",
+                albums = state.albums.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }),
+                currentAlbum = currentPhoto.bucketName,
                 onDismiss = { showAlbumDialog = false },
-                onConfirm = { albumName ->
+                onConfirm = { album ->
                     showAlbumDialog = false
                     scope.launch {
-                        val ok = if (albumDialogCopy) viewModel.repository.copyToAlbum(currentPhoto, albumName) else viewModel.repository.moveToAlbum(currentPhoto, albumName)
-                        viewModel.showMessage(if (ok) (if (albumDialogCopy) "Copied to $albumName" else "Moved to $albumName") else "Album operation failed")
+                        val target = album.relativePath.ifBlank { album.name }
+                        val ok = if (albumDialogCopy) viewModel.repository.copyToAlbum(currentPhoto, target) else viewModel.repository.moveToAlbum(currentPhoto, target)
+                        viewModel.showMessage(if (ok) (if (albumDialogCopy) "Copied to $target" else "Moved to $target") else "Album operation failed")
                         viewModel.refreshMedia()
                     }
                 }
@@ -408,26 +415,58 @@ fun PhotoViewerScreen(
 }
 
 @Composable
-private fun AlbumNameDialog(
+private fun AlbumPickerDialog(
     title: String,
+    albums: List<com.example.data.model.MediaAlbum>,
+    currentAlbum: String,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
+    onConfirm: (com.example.data.model.MediaAlbum) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
+    var newAlbumMode by remember { mutableStateOf(false) }
+    var newAlbumName by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                label = { Text("Album name") },
-                placeholder = { Text("e.g. Vacation") }
-            )
+            if (newAlbumMode) {
+                OutlinedTextField(
+                    value = newAlbumName,
+                    onValueChange = { newAlbumName = it },
+                    singleLine = true,
+                    label = { Text("New album name") },
+                    placeholder = { Text("e.g. Family, Travel") }
+                )
+            } else {
+                Column(modifier = Modifier.heightIn(max = 360.dp)) {
+                    if (albums.isEmpty()) {
+                        Text("No albums found. Create a new album below.")
+                    } else {
+                        LazyColumn {
+                            items(albums, key = { it.id }) { album ->
+                                TextButton(
+                                    onClick = { onConfirm(album) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = if (album.name.equals(currentAlbum, true)) "${album.name} (current)" else album.name,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
-            TextButton(onClick = { if (name.trim().isNotEmpty()) onConfirm(name.trim()) }) { Text("OK") }
+            if (newAlbumMode) {
+                TextButton(onClick = {
+                    val name = newAlbumName.trim()
+                    if (name.isNotEmpty()) onConfirm(com.example.data.model.MediaAlbum(name, name, null, 0, 0, 0, System.currentTimeMillis(), ""))
+                }) { Text("Create & Use") }
+            } else {
+                TextButton(onClick = { newAlbumMode = true }) { Text("+ New album") }
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
