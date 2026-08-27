@@ -29,7 +29,7 @@ abstract class SultanDatabase : RoomDatabase() {
                     context.applicationContext,
                     SultanDatabase::class.java,
                     "sultan_gallery_database"
-                ).fallbackToDestructiveMigration().build()
+                ).fallbackToDestructiveMigration(dropAllTables = true).build()
                 INSTANCE = instance
                 instance
             }
