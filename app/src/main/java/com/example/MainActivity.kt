@@ -51,6 +51,8 @@ fun SultanGalleryApp(
     val navController = rememberNavController()
 
     SultanGalleryTheme(
+        themeMode = state.themeMode,
+        backgroundStyle = state.backgroundStyle,
         darkTheme = state.isDark,
         isAmoled = state.isAmoled
     ) {

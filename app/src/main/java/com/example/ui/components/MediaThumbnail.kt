@@ -93,14 +93,20 @@ fun MediaThumbnail(
                 }
             }
         } else {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
+            val imageRequest = androidx.compose.runtime.remember(item.uri, item.isVideo) {
+                ImageRequest.Builder(context)
                     .data(item.uri)
                     .crossfade(false)
+                    .size(320, 320)
+                    .precision(coil.size.Precision.INEXACT)
+                    .allowHardware(true)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .apply { if (item.isVideo) decoderFactory(VideoFrameDecoder.Factory()) }
-                    .build(),
+                    .build()
+            }
+            AsyncImage(
+                model = imageRequest,
                 contentDescription = item.displayName,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()

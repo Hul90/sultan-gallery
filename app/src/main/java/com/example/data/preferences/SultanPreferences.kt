@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.model.AppBackgroundStyle
+import com.example.data.model.AppThemeMode
 import com.example.data.model.GridMode
 import com.example.data.model.FormatFilter
 import com.example.data.model.SortOrder
@@ -19,6 +21,8 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "su
 class SultanPreferences(private val context: Context) {
 
     companion object {
+        private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_BACKGROUND_STYLE = stringPreferencesKey("background_style")
         private val KEY_DARK_THEME = booleanPreferencesKey("dark_theme")
         private val KEY_AMOLED_MODE = booleanPreferencesKey("amoled_mode")
         private val KEY_GRID_MODE = stringPreferencesKey("grid_mode")
@@ -30,12 +34,22 @@ class SultanPreferences(private val context: Context) {
         private val KEY_PLAYBACK_SPEED = floatPreferencesKey("playback_speed")
     }
 
+    val themeMode: Flow<AppThemeMode> = context.dataStore.data.map { prefs ->
+        val name = prefs[KEY_THEME_MODE] ?: AppThemeMode.SULTAN_GOLD.name
+        runCatching { AppThemeMode.valueOf(name) }.getOrDefault(AppThemeMode.SULTAN_GOLD)
+    }
+
+    val backgroundStyle: Flow<AppBackgroundStyle> = context.dataStore.data.map { prefs ->
+        val name = prefs[KEY_BACKGROUND_STYLE] ?: AppBackgroundStyle.AMBIENT_GLOW.name
+        runCatching { AppBackgroundStyle.valueOf(name) }.getOrDefault(AppBackgroundStyle.AMBIENT_GLOW)
+    }
+
     val isDarkTheme: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_DARK_THEME] ?: true
     }
 
     val isAmoledMode: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_AMOLED_MODE] ?: true
+        prefs[KEY_AMOLED_MODE] ?: false
     }
 
     val gridMode: Flow<GridMode> = context.dataStore.data.map { prefs ->
@@ -75,6 +89,14 @@ class SultanPreferences(private val context: Context) {
 
     val playbackSpeed: Flow<Float> = context.dataStore.data.map { prefs ->
         prefs[KEY_PLAYBACK_SPEED] ?: 1.0f
+    }
+
+    suspend fun setThemeMode(mode: AppThemeMode) {
+        context.dataStore.edit { it[KEY_THEME_MODE] = mode.name }
+    }
+
+    suspend fun setBackgroundStyle(style: AppBackgroundStyle) {
+        context.dataStore.edit { it[KEY_BACKGROUND_STYLE] = style.name }
     }
 
     suspend fun setDarkTheme(enabled: Boolean) {

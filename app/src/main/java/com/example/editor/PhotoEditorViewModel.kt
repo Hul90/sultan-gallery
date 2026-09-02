@@ -8,11 +8,13 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.CropPreset
 import com.example.data.model.FilterType
+import com.example.tools.SultanPhotoCollage
 import com.example.tools.SultanSmartCrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,7 +46,8 @@ data class EditorSessionState(
     val textStickers: List<TextSticker> = emptyList(),
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val isSaving: Boolean = false
+    val isSaving: Boolean = false,
+    val showOriginal: Boolean = false
 )
 
 enum class EditorTab(val label: String) {
@@ -53,7 +56,8 @@ enum class EditorTab(val label: String) {
     CROP("Crop"),
     TRANSFORM("Rotate/Flip"),
     DRAW("Draw & Paint"),
-    TEXT("Text & Stickers")
+    TEXT("Text & Stickers"),
+    COLLAGE("Collage Studio")
 }
 
 class PhotoEditorViewModel : ViewModel() {
@@ -68,11 +72,8 @@ class PhotoEditorViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val options = BitmapFactory.Options().apply {
-                        // Max dimension 2560 for performance and memory safety
-                        inJustDecodeBounds = true
-                    }
                     val bytes = stream.readBytes()
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
 
                     var sampleSize = 1
@@ -80,15 +81,29 @@ class PhotoEditorViewModel : ViewModel() {
                         sampleSize *= 2
                     }
 
-                    val decodeOptions = BitmapFactory.Options().apply {
-                        inSampleSize = sampleSize
-                    }
+                    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
                     val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
                     if (bitmap != null) {
+                        undoStack.clear()
+                        redoStack.clear()
                         _uiState.update {
                             it.copy(
                                 originalBitmap = bitmap,
-                                previewBitmap = bitmap
+                                previewBitmap = bitmap,
+                                canUndo = false,
+                                canRedo = false,
+                                paths = emptyList(),
+                                textStickers = emptyList(),
+                                brightness = 0f,
+                                contrast = 1f,
+                                saturation = 1f,
+                                temperature = 0f,
+                                tint = 0f,
+                                vignette = 0f,
+                                activeFilter = FilterType.ORIGINAL,
+                                rotationAngle = 0f,
+                                flipH = false,
+                                flipV = false
                             )
                         }
                     }
@@ -101,6 +116,10 @@ class PhotoEditorViewModel : ViewModel() {
 
     fun setActiveTab(tab: EditorTab) {
         _uiState.update { it.copy(activeTab = tab) }
+    }
+
+    fun setShowOriginal(show: Boolean) {
+        _uiState.update { it.copy(showOriginal = show) }
     }
 
     fun updateAdjustment(
@@ -125,15 +144,32 @@ class PhotoEditorViewModel : ViewModel() {
         recomputePreview()
     }
 
+    fun resetAdjustments() {
+        saveStateForUndo()
+        _uiState.update {
+            it.copy(
+                brightness = 0f,
+                contrast = 1f,
+                saturation = 1f,
+                temperature = 0f,
+                tint = 0f,
+                vignette = 0f,
+                activeFilter = FilterType.ORIGINAL
+            )
+        }
+        recomputePreview()
+    }
+
     fun setFilter(filter: FilterType) {
         saveStateForUndo()
         _uiState.update { it.copy(activeFilter = filter) }
         recomputePreview()
     }
 
-    fun rotate90() {
+    fun rotate90(clockwise: Boolean = true) {
         saveStateForUndo()
-        _uiState.update { it.copy(rotationAngle = (it.rotationAngle + 90f) % 360f) }
+        val delta = if (clockwise) 90f else -90f
+        _uiState.update { it.copy(rotationAngle = (it.rotationAngle + delta + 360f) % 360f) }
         recomputePreview()
     }
 
@@ -151,6 +187,10 @@ class PhotoEditorViewModel : ViewModel() {
 
     fun applyCropPreset(preset: CropPreset) {
         val currentBitmap = _uiState.value.previewBitmap ?: return
+        if (preset == CropPreset.FREE) {
+            _uiState.update { it.copy(selectedCropPreset = preset) }
+            return
+        }
         saveStateForUndo()
         val rect = SultanSmartCrop.calculateCropRect(currentBitmap.width, currentBitmap.height, preset)
         val cropped = SultanSmartCrop.cropBitmap(currentBitmap, rect)
@@ -158,14 +198,32 @@ class PhotoEditorViewModel : ViewModel() {
             it.copy(
                 originalBitmap = cropped,
                 previewBitmap = cropped,
-                selectedCropPreset = preset
+                selectedCropPreset = preset,
+                brightness = 0f,
+                contrast = 1f,
+                saturation = 1f,
+                temperature = 0f,
+                tint = 0f,
+                vignette = 0f,
+                activeFilter = FilterType.ORIGINAL,
+                rotationAngle = 0f,
+                flipH = false,
+                flipV = false
             )
         }
     }
 
     fun addDrawPath(drawPath: DrawPath) {
+        if (drawPath.points.size < 2) return
         saveStateForUndo()
         _uiState.update { it.copy(paths = it.paths + drawPath) }
+    }
+
+    fun clearDrawPaths() {
+        if (_uiState.value.paths.isNotEmpty()) {
+            saveStateForUndo()
+            _uiState.update { it.copy(paths = emptyList()) }
+        }
     }
 
     fun setDrawTool(tool: DrawTool) {
@@ -180,16 +238,78 @@ class PhotoEditorViewModel : ViewModel() {
         _uiState.update { it.copy(brushSize = size) }
     }
 
-    fun addTextSticker(text: String, color: Int = Color.WHITE, bgColor: Int = Color.BLACK) {
+    fun addTextSticker(text: String, color: Int = Color.WHITE, bgColor: Int = Color.BLACK, fontSize: Float = 24f) {
         if (text.isBlank()) return
         saveStateForUndo()
         val sticker = TextSticker(
             text = text,
             color = color,
             backgroundColor = bgColor,
-            position = androidx.compose.ui.geometry.Offset(200f, 200f)
+            fontSize = fontSize,
+            normalizedX = 0.5f,
+            normalizedY = 0.5f
         )
         _uiState.update { it.copy(textStickers = it.textStickers + sticker) }
+    }
+
+    fun updateTextStickerPosition(id: Long, normX: Float, normY: Float) {
+        _uiState.update { state ->
+            val updated = state.textStickers.map {
+                if (it.id == id) it.copy(
+                    normalizedX = normX.coerceIn(0.05f, 0.95f),
+                    normalizedY = normY.coerceIn(0.05f, 0.95f)
+                ) else it
+            }
+            state.copy(textStickers = updated)
+        }
+    }
+
+    fun removeTextSticker(id: Long) {
+        saveStateForUndo()
+        _uiState.update { state ->
+            state.copy(textStickers = state.textStickers.filter { it.id != id })
+        }
+    }
+
+    fun createCollageInEditor(
+        context: Context,
+        uris: List<Uri>,
+        backgroundColor: Int = Color.BLACK,
+        padding: Int = 16,
+        cornerRadius: Float = 12f
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val collageBmp = SultanPhotoCollage.createCollage(
+                    context = context,
+                    uris = uris,
+                    backgroundColor = backgroundColor,
+                    padding = padding,
+                    cornerRadius = cornerRadius
+                )
+                saveStateForUndo()
+                _uiState.update {
+                    it.copy(
+                        originalBitmap = collageBmp,
+                        previewBitmap = collageBmp,
+                        paths = emptyList(),
+                        textStickers = emptyList(),
+                        brightness = 0f,
+                        contrast = 1f,
+                        saturation = 1f,
+                        temperature = 0f,
+                        tint = 0f,
+                        vignette = 0f,
+                        activeFilter = FilterType.ORIGINAL,
+                        rotationAngle = 0f,
+                        flipH = false,
+                        flipV = false
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun saveStateForUndo() {
@@ -248,27 +368,34 @@ class PhotoEditorViewModel : ViewModel() {
         val canvas = Canvas(result)
         canvas.drawBitmap(base, 0f, 0f, null)
 
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
         }
 
-        // Draw overlay paths
+        val imgW = base.width.toFloat()
+        val imgH = base.height.toFloat()
+
+        // Render drawing paths
         for (dp in state.paths) {
-            paint.color = dp.color
-            paint.strokeWidth = dp.strokeWidth
-            if (dp.isHighlighter) {
-                paint.alpha = 110
-            } else {
-                paint.alpha = 255
+            if (dp.points.size < 2) continue
+            strokePaint.color = dp.color
+            // Scale stroke relative to image dimension
+            val scaleFactor = (imgW.coerceAtLeast(imgH)) / 1000f
+            strokePaint.strokeWidth = dp.strokeWidth * scaleFactor.coerceAtLeast(1.0f)
+            strokePaint.alpha = if (dp.isHighlighter) 120 else 255
+
+            val path = Path()
+            path.moveTo(dp.points[0].x * imgW, dp.points[0].y * imgH)
+            for (i in 1 until dp.points.size) {
+                path.lineTo(dp.points[i].x * imgW, dp.points[i].y * imgH)
             }
-            canvas.drawPath(dp.path, paint)
+            canvas.drawPath(path, strokePaint)
         }
 
-        // Draw Text stickers
+        // Render Text stickers
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 48f
             isFakeBoldText = true
         }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -276,24 +403,33 @@ class PhotoEditorViewModel : ViewModel() {
         }
 
         for (sticker in state.textStickers) {
+            val textSize = sticker.fontSize * (imgW / 400f).coerceIn(1.5f, 5.0f)
+            textPaint.textSize = textSize
             textPaint.color = sticker.color
-            bgPaint.color = sticker.backgroundColor
-            bgPaint.alpha = 180
 
             val bounds = Rect()
             textPaint.getTextBounds(sticker.text, 0, sticker.text.length, bounds)
-            val padding = 16f
-            val rect = androidx.compose.ui.geometry.Rect(
-                sticker.position.x - padding,
-                sticker.position.y - bounds.height() - padding,
-                sticker.position.x + bounds.width() + padding,
-                sticker.position.y + padding
+
+            val posX = sticker.normalizedX * imgW
+            val posY = sticker.normalizedY * imgH
+
+            val padX = textSize * 0.4f
+            val padY = textSize * 0.3f
+            val bgRect = RectF(
+                posX - bounds.width() / 2f - padX,
+                posY - bounds.height() / 2f - padY,
+                posX + bounds.width() / 2f + padX,
+                posY + bounds.height() / 2f + padY
             )
-            canvas.drawRoundRect(
-                rect.left, rect.top, rect.right, rect.bottom,
-                16f, 16f, bgPaint
-            )
-            canvas.drawText(sticker.text, sticker.position.x, sticker.position.y, textPaint)
+
+            bgPaint.color = sticker.backgroundColor
+            bgPaint.alpha = 210
+            canvas.drawRoundRect(bgRect, 18f, 18f, bgPaint)
+
+            // Draw text centered
+            val textX = posX - bounds.width() / 2f - bounds.left
+            val textY = posY + bounds.height() / 2f - bounds.bottom
+            canvas.drawText(sticker.text, textX, textY, textPaint)
         }
 
         result

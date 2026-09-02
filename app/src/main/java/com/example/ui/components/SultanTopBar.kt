@@ -161,7 +161,7 @@ fun SultanTopBar(
                                 text = "SULTAN GALLERY",
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 0.4.sp,
-                                color = SultanGold,
+                                color = MaterialTheme.colorScheme.primary,
                                 fontSize = 18.sp,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -183,7 +183,7 @@ fun SultanTopBar(
                             Icon(
                                 Icons.Default.AutoAwesome,
                                 contentDescription = "Sultan Tools",
-                                tint = SultanGold
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
 
@@ -202,7 +202,7 @@ fun SultanTopBar(
                                             Text(
                                                 text = order.label,
                                                 fontWeight = if (order == currentSortOrder) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (order == currentSortOrder) SultanGold else MaterialTheme.colorScheme.onSurface
+                                                color = if (order == currentSortOrder) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                             )
                                         },
                                         onClick = {
@@ -232,7 +232,7 @@ fun SultanTopBar(
                                             Text(
                                                 text = mode.label,
                                                 fontWeight = if (mode == currentGridMode) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (mode == currentGridMode) SultanGold else MaterialTheme.colorScheme.onSurface
+                                                color = if (mode == currentGridMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                             )
                                         },
                                         onClick = {
@@ -250,7 +250,7 @@ fun SultanTopBar(
                                 Icon(
                                     Icons.Default.FilterList,
                                     contentDescription = "Filter by format",
-                                    tint = if (currentFormatFilter == FormatFilter.ALL) MaterialTheme.colorScheme.onSurface else SultanGold
+                                    tint = if (currentFormatFilter == FormatFilter.ALL) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
                                 )
                             }
                             DropdownMenu(
@@ -263,7 +263,7 @@ fun SultanTopBar(
                                             Text(
                                                 text = filter.label,
                                                 fontWeight = if (filter == currentFormatFilter) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (filter == currentFormatFilter) SultanGold else MaterialTheme.colorScheme.onSurface
+                                                color = if (filter == currentFormatFilter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                             )
                                         },
                                         onClick = {
@@ -281,7 +281,7 @@ fun SultanTopBar(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = Color.Transparent
                 )
             )
         }

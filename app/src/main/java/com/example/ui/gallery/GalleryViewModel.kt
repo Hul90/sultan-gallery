@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.SultanDatabase
 import com.example.data.local.TrashEntity
 import com.example.data.local.VaultEntity
+import com.example.data.model.AppBackgroundStyle
+import com.example.data.model.AppThemeMode
 import com.example.data.model.GridMode
 import com.example.data.model.MediaAlbum
 import com.example.data.model.MediaItem
@@ -45,8 +47,10 @@ data class GalleryUiState(
     val selectedItemIds: Set<Long> = emptySet(),
     val sortOrder: SortOrder = SortOrder.DATE_DESC,
     val gridMode: GridMode = GridMode.NORMAL,
+    val themeMode: AppThemeMode = AppThemeMode.SULTAN_GOLD,
+    val backgroundStyle: AppBackgroundStyle = AppBackgroundStyle.AMBIENT_GLOW,
     val isVaultUnlocked: Boolean = false,
-    val isAmoled: Boolean = true,
+    val isAmoled: Boolean = false,
     val isDark: Boolean = true,
     val showAudio: Boolean = true,
     val userMessage: String? = null,
@@ -62,6 +66,8 @@ data class GalleryUiState(
 private data class GalleryPreferenceSnapshot(
     val grid: GridMode,
     val sort: SortOrder,
+    val theme: AppThemeMode,
+    val bgStyle: AppBackgroundStyle,
     val amoled: Boolean,
     val dark: Boolean,
     val audio: Boolean
@@ -99,27 +105,44 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
 
     private fun observePreferences() {
         viewModelScope.launch {
-            combine(
-                preferences.gridMode,
-                preferences.sortOrder,
-                preferences.isAmoledMode,
-                preferences.isDarkTheme,
-                preferences.showAudio
-            ) { grid, sort, amoled, dark, audio ->
-                GalleryPreferenceSnapshot(grid, sort, amoled, dark, audio)
-            }.combine(preferences.formatFilter) { snapshot, format ->
+            val p1 = combine(preferences.gridMode, preferences.sortOrder, preferences.themeMode) { grid, sort, theme ->
+                Triple(grid, sort, theme)
+            }
+            val p2 = combine(preferences.backgroundStyle, preferences.isAmoledMode, preferences.isDarkTheme, preferences.showAudio) { bgStyle, amoled, dark, audio ->
+                listOf(bgStyle, amoled, dark, audio)
+            }
+            combine(p1, p2, preferences.formatFilter) { t1, t2, format ->
+                val bgStyle = t2[0] as AppBackgroundStyle
+                val amoled = t2[1] as Boolean
+                val dark = t2[2] as Boolean
+                val audio = t2[3] as Boolean
+
                 _uiState.update {
                     it.copy(
-                        gridMode = snapshot.grid,
-                        sortOrder = snapshot.sort,
-                        isAmoled = snapshot.amoled,
-                        isDark = snapshot.dark,
-                        showAudio = snapshot.audio,
+                        gridMode = t1.first,
+                        sortOrder = t1.second,
+                        themeMode = t1.third,
+                        backgroundStyle = bgStyle,
+                        isAmoled = amoled,
+                        isDark = dark,
+                        showAudio = audio,
                         formatFilter = format
                     )
                 }
                 applyFilterAndSort()
             }.collect {}
+        }
+    }
+
+    fun setThemeMode(mode: AppThemeMode) {
+        viewModelScope.launch {
+            preferences.setThemeMode(mode)
+        }
+    }
+
+    fun setBackgroundStyle(style: AppBackgroundStyle) {
+        viewModelScope.launch {
+            preferences.setBackgroundStyle(style)
         }
     }
 
@@ -392,83 +415,88 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(userMessage = null) }
     }
 
+    private var filterJob: kotlinx.coroutines.Job? = null
+
     private fun applyFilterAndSort() {
-        val state = _uiState.value
-        var list = state.allMedia
+        filterJob?.cancel()
+        filterJob = viewModelScope.launch(Dispatchers.Default) {
+            val state = _uiState.value
+            var list = state.allMedia
 
-        // Filter by Tab / Album
-        if (state.selectedAlbum != null) {
-            val albumName = state.selectedAlbum.name
-            list = list.filter {
-                if (albumName == "Audio") it.isAudio
-                else it.bucketName.equals(albumName, ignoreCase = true)
+            // Filter by Tab / Album
+            if (state.selectedAlbum != null) {
+                val albumName = state.selectedAlbum.name
+                list = list.filter {
+                    if (albumName == "Audio") it.isAudio
+                    else it.bucketName.equals(albumName, ignoreCase = true)
+                }
+            } else {
+                list = when (state.currentTab) {
+                    MediaTab.ALL -> list
+                    MediaTab.RECENT -> list.take(150)
+                    MediaTab.PHOTOS -> list.filter { !it.isVideo && !it.isAudio }
+                    MediaTab.VIDEOS -> list.filter { it.isVideo }
+                    MediaTab.AUDIO -> list.filter { it.isAudio }
+                    MediaTab.FAVORITES -> list.filter { it.isFavorite }
+                    MediaTab.SCREENSHOTS -> list.filter {
+                        val name = it.displayName.lowercase()
+                        val bucket = it.bucketName.lowercase()
+                        name.contains("screenshot") || bucket.contains("screenshot")
+                    }
+                    MediaTab.DOWNLOADS -> list.filter {
+                        val bucket = it.bucketName.lowercase()
+                        val path = it.path.lowercase()
+                        bucket.contains("download") || path.contains("download")
+                    }
+                    MediaTab.CAMERA -> list.filter {
+                        val bucket = it.bucketName.lowercase()
+                        bucket.contains("camera") || bucket.contains("dcim")
+                    }
+                    MediaTab.WHATSAPP -> list.filter {
+                        it.bucketName.lowercase().contains("whatsapp") || it.path.lowercase().contains("whatsapp")
+                    }
+                    MediaTab.TELEGRAM -> list.filter {
+                        it.bucketName.lowercase().contains("telegram") || it.path.lowercase().contains("telegram")
+                    }
+                    MediaTab.ALBUMS, MediaTab.TRASH, MediaTab.VAULT -> list
+                }
             }
-        } else {
-            list = when (state.currentTab) {
-                MediaTab.ALL -> list
-                MediaTab.RECENT -> list.take(150)
-                MediaTab.PHOTOS -> list.filter { !it.isVideo && !it.isAudio }
-                MediaTab.VIDEOS -> list.filter { it.isVideo }
-                MediaTab.AUDIO -> list.filter { it.isAudio }
-                MediaTab.FAVORITES -> list.filter { it.isFavorite }
-                MediaTab.SCREENSHOTS -> list.filter {
-                    val name = it.displayName.lowercase()
-                    val bucket = it.bucketName.lowercase()
-                    name.contains("screenshot") || bucket.contains("screenshot")
+
+            // Filter by Format
+            if (state.formatFilter != com.example.data.model.FormatFilter.ALL) {
+                val allowedExtensions = state.formatFilter.extensions.map { it.lowercase() }
+                list = list.filter { item ->
+                    val ext = item.displayName.substringAfterLast('.', "").lowercase()
+                    allowedExtensions.contains(ext) || allowedExtensions.any { item.mimeType.lowercase().contains(it) }
                 }
-                MediaTab.DOWNLOADS -> list.filter {
-                    val bucket = it.bucketName.lowercase()
-                    val path = it.path.lowercase()
-                    bucket.contains("download") || path.contains("download")
-                }
-                MediaTab.CAMERA -> list.filter {
-                    val bucket = it.bucketName.lowercase()
-                    bucket.contains("camera") || bucket.contains("dcim")
-                }
-                MediaTab.WHATSAPP -> list.filter {
-                    it.bucketName.lowercase().contains("whatsapp") || it.path.lowercase().contains("whatsapp")
-                }
-                MediaTab.TELEGRAM -> list.filter {
-                    it.bucketName.lowercase().contains("telegram") || it.path.lowercase().contains("telegram")
-                }
-                MediaTab.ALBUMS, MediaTab.TRASH, MediaTab.VAULT -> list
             }
-        }
 
-        // Filter by Format
-        if (state.formatFilter != com.example.data.model.FormatFilter.ALL) {
-            val allowedExtensions = state.formatFilter.extensions.map { it.lowercase() }
-            list = list.filter { item ->
-                val ext = item.displayName.substringAfterLast('.', "").lowercase()
-                allowedExtensions.contains(ext) || allowedExtensions.any { item.mimeType.lowercase().contains(it) }
+            // Filter by Search
+            if (state.searchQuery.isNotBlank()) {
+                val q = state.searchQuery.trim().lowercase()
+                list = list.filter { item ->
+                    item.displayName.lowercase().contains(q) ||
+                    item.bucketName.lowercase().contains(q) ||
+                    item.mimeType.lowercase().contains(q) ||
+                    (q == "video" && item.isVideo) ||
+                    (q == "photo" && !item.isVideo && !item.isAudio) ||
+                    (q == "audio" && item.isAudio) ||
+                    (q == "favorite" && item.isFavorite) ||
+                    (q == "large" && item.size > 10 * 1024 * 1024)
+                }
             }
-        }
 
-        // Filter by Search
-        if (state.searchQuery.isNotBlank()) {
-            val q = state.searchQuery.trim().lowercase()
-            list = list.filter { item ->
-                item.displayName.lowercase().contains(q) ||
-                item.bucketName.lowercase().contains(q) ||
-                item.mimeType.lowercase().contains(q) ||
-                (q == "video" && item.isVideo) ||
-                (q == "photo" && !item.isVideo && !item.isAudio) ||
-                (q == "audio" && item.isAudio) ||
-                (q == "favorite" && item.isFavorite) ||
-                (q == "large" && item.size > 10 * 1024 * 1024)
+            // Apply Sorting
+            list = when (state.sortOrder) {
+                SortOrder.DATE_DESC -> list.sortedByDescending { it.dateAdded }
+                SortOrder.DATE_ASC -> list.sortedBy { it.dateAdded }
+                SortOrder.NAME_ASC -> list.sortedBy { it.displayName.lowercase() }
+                SortOrder.NAME_DESC -> list.sortedByDescending { it.displayName.lowercase() }
+                SortOrder.SIZE_DESC -> list.sortedByDescending { it.size }
+                SortOrder.SIZE_ASC -> list.sortedBy { it.size }
             }
-        }
 
-        // Apply Sorting
-        list = when (state.sortOrder) {
-            SortOrder.DATE_DESC -> list.sortedByDescending { it.dateAdded }
-            SortOrder.DATE_ASC -> list.sortedBy { it.dateAdded }
-            SortOrder.NAME_ASC -> list.sortedBy { it.displayName.lowercase() }
-            SortOrder.NAME_DESC -> list.sortedByDescending { it.displayName.lowercase() }
-            SortOrder.SIZE_DESC -> list.sortedByDescending { it.size }
-            SortOrder.SIZE_ASC -> list.sortedBy { it.size }
+            _uiState.update { it.copy(filteredMedia = list) }
         }
-
-        _uiState.update { it.copy(filteredMedia = list) }
     }
 }

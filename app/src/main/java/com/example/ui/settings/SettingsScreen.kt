@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
@@ -76,6 +77,7 @@ import com.example.data.model.SortOrder
 import com.example.ui.gallery.GalleryViewModel
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkSurface
+import com.example.ui.theme.DarkSurfaceVariant
 import com.example.ui.theme.ObsidianBlack
 import com.example.ui.theme.SultanGold
 import kotlinx.coroutines.launch
@@ -121,8 +123,107 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Display & Theme Section
-            SectionHeader("Appearance & Display")
+            // Display & Theme Studio Section
+            SectionHeader("Unique Themes & Backgrounds")
+            Text(
+                text = "Personalize your gallery with luxury color palettes and aesthetic background styles.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.LightGray,
+                modifier = Modifier.padding(bottom = 10.dp)
+            )
+
+            // Theme Cards List
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.example.data.model.AppThemeMode.entries.forEach { themeOption ->
+                    val isSelected = state.themeMode == themeOption && (!state.isAmoled || themeOption == com.example.data.model.AppThemeMode.MIDNIGHT_AMOLED)
+                    ThemeSelectionCard(
+                        themeOption = themeOption,
+                        isSelected = isSelected,
+                        onClick = {
+                            if (themeOption == com.example.data.model.AppThemeMode.MIDNIGHT_AMOLED) {
+                                scope.launch {
+                                    galleryViewModel.preferences.setAmoledMode(true)
+                                    galleryViewModel.preferences.setThemeMode(themeOption)
+                                }
+                            } else {
+                                scope.launch {
+                                    galleryViewModel.preferences.setAmoledMode(false)
+                                    galleryViewModel.preferences.setThemeMode(themeOption)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Background Style Section
+            SectionHeader("Background Canvas Style")
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Choose canvas aura and ambient lighting:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        com.example.data.model.AppBackgroundStyle.entries.forEach { bgOption ->
+                            val isSelected = state.backgroundStyle == bgOption
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.5.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else DarkBorder,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        scope.launch { galleryViewModel.preferences.setBackgroundStyle(bgOption) }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = bgOption.title,
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White
+                                    )
+                                    Text(
+                                        text = bgOption.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Appearance & Media Indexing Section
+            SectionHeader("Display & Media Options")
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -130,8 +231,8 @@ fun SettingsScreen(
             ) {
                 Column {
                     SettingsSwitchRow(
-                        title = "AMOLED Pure Black",
-                        subtitle = "True #000000 background for OLED battery savings",
+                        title = "AMOLED Pure Black Mode",
+                        subtitle = "Overrides canvas with pure #000000 for maximum OLED battery life",
                         icon = Icons.Default.DarkMode,
                         checked = state.isAmoled,
                         onCheckedChange = {
@@ -141,7 +242,7 @@ fun SettingsScreen(
                     HorizontalDivider(color = DarkBorder)
                     SettingsSwitchRow(
                         title = "Show Audio & Music Files",
-                        subtitle = "Include audio tracks and recordings in gallery indexing",
+                        subtitle = "Include audio tracks and voice recordings in gallery indexing",
                         icon = Icons.Default.MusicNote,
                         checked = state.showAudio,
                         onCheckedChange = {
@@ -151,6 +252,59 @@ fun SettingsScreen(
                             }
                         }
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Performance & Memory Optimizer Section (Fixes hang / crash on long usage)
+            SectionHeader("Performance & Memory Optimizer")
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    SettingsClickRow(
+                        title = "Deep Clean Memory & Image Cache",
+                        subtitle = "Frees temporary bitmap buffers, clears thumbnail cache & boosts RAM",
+                        icon = Icons.Default.CleaningServices,
+                        onClick = {
+                            coil.Coil.imageLoader(context).memoryCache?.clear()
+                            System.gc()
+                            galleryViewModel.refreshMedia(forceFullScan = true)
+                            galleryViewModel.showMessage("Memory optimized & thumbnail cache refreshed!")
+                        }
+                    )
+                    HorizontalDivider(color = DarkBorder)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = SultanGold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Lag & Crash Prevention Active",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Large Heap 512MB RAM • Auto-downsampled thumbnails • Bounded decode pipelines",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
             }
 
@@ -424,6 +578,88 @@ private fun SettingsClickRow(
             Column {
                 Text(text = title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
                 Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeSelectionCard(
+    themeOption: com.example.data.model.AppThemeMode,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val primaryColor = Color(themeOption.primaryColorHex)
+    val accentColor = Color(themeOption.accentColorHex)
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) DarkSurfaceVariant else DarkSurface
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (isSelected) 1.5.dp else 0.5.dp,
+                color = if (isSelected) primaryColor else DarkBorder,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Dual-color palette preview bubble
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(primaryColor, accentColor)
+                                )
+                            )
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column {
+                    Text(
+                        text = themeOption.title,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isSelected) primaryColor else Color.White
+                    )
+                    Text(
+                        text = themeOption.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Active Theme",
+                    tint = primaryColor,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
     }

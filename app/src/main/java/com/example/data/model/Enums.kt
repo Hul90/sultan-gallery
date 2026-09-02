@@ -1,13 +1,13 @@
 package com.example.data.model
 
 enum class MediaTab(val title: String) {
+    ALBUMS("All Albums"),
     ALL("All Media"),
-    RECENT("Recent"),
     PHOTOS("Photos"),
     VIDEOS("Videos"),
-    ALBUMS("Albums"),
     FAVORITES("Favorites"),
     AUDIO("Audio"),
+    RECENT("Recent"),
     SCREENSHOTS("Screenshots"),
     DOWNLOADS("Downloads"),
     CAMERA("Camera"),
